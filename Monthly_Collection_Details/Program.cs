@@ -25,6 +25,7 @@ builder.Services.AddScoped<CustomerService>();
 builder.Services.AddScoped<OutstandingCustomerService>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<Service1>();
+builder.Services.AddScoped<Service2>();
 
 builder.Services.AddEndpointsApiExplorer();
 
