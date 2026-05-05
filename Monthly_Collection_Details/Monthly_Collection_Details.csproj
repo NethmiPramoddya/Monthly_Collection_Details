@@ -11,6 +11,7 @@
     <PackageReference Include="Dapper" Version="2.1.66" />
     <PackageReference Include="Informix.Net.Core" Version="4.700.7.2021" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.0" />
+    <PackageReference Include="Npgsql" Version="10.0.2" />
     <PackageReference Include="QuestPDF" Version="2025.12.3" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
     <PackageReference Include="System.Data.Odbc" Version="10.0.2" />
