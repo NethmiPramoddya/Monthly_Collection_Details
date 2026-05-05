@@ -1,0 +1,6 @@
+@Monthly_Collection_Details_HostAddress = http://localhost:5124
+
+GET {{Monthly_Collection_Details_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
