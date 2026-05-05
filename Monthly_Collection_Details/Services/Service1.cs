@@ -43,7 +43,7 @@ namespace Monthly_Collection_Details.Services
                         records.Add(new Model1.CheqMyNoRecord
                         {
                             MyBranch = reader["my_branch"].ToString(),
-                            MyAddCode = reader["myadd_code"].ToString(),
+                            MyAddCode = reader["myadd_code"].ToString().Trim(),
                             OpenTime = reader["opentime"].ToString(),
                             MyCodeDesc = reader["mycode_desc"].ToString()
                         });
