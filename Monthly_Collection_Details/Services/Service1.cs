@@ -129,5 +129,93 @@ namespace Monthly_Collection_Details.Services
 
             return records;
         }
+
+        // Fetches a single notice record by noticeNo and myAddCode
+        // myAddCode is from login — ensures user can only print their own province
+        public async Task<Model1.ChequeNoticeDetail?> GetNoticeDetailAsync(
+            string noticeNo, string myAddCode)
+        {
+            Model1.ChequeNoticeDetail? detail = null;
+
+            using (var con = new IfxConnection(_connectionString))
+            {
+                await con.OpenAsync();
+
+                string sql = @"
+            SELECT
+                d.my_code,
+                d.acct_number,
+                d.cheq_no,
+                d.cheq_date,
+                d.entry_date,
+                d.cust_fname,
+                d.cust_lname,
+                d.address_1,
+                d.address_2,
+                d.address_3,
+                d.amount,
+                d.postage,
+                d.bank_charges,
+                d.surcharge,
+                d.percentage,
+                d.remark,
+                d.myadd_code,
+                a.myadd_tel,
+                a.myadd_desc1,
+                a.myadd_desc2
+            FROM cheqmy_details d
+            INNER JOIN cheqmy_address a ON a.myadd_code = d.myadd_code
+            WHERE d.my_code    = ?
+              AND d.myadd_code = ?";
+
+                using (var cmd = new IfxCommand(sql, con))
+                {
+                    cmd.Parameters.Add(new IfxParameter { Value = noticeNo.Trim() });
+                    cmd.Parameters.Add(new IfxParameter { Value = myAddCode.Trim().ToUpper() });
+
+                    using var reader = await cmd.ExecuteReaderAsync();
+
+                    if (await reader.ReadAsync())
+                    {
+                        decimal amount = Convert.ToDecimal(reader["amount"]);
+                        decimal postage = Convert.ToDecimal(reader["postage"]);
+                        decimal bankCharges = Convert.ToDecimal(reader["bank_charges"]);
+                        decimal surcharge = Convert.ToDecimal(reader["surcharge"]);
+
+                        detail = new Model1.ChequeNoticeDetail
+                        {
+                            NoticeNo = reader["my_code"].ToString().Trim(),
+                            AccountNo = reader["acct_number"].ToString().Trim(),
+                            ChequeNo = reader["cheq_no"].ToString().Trim(),
+                            ChequeDate = reader["cheq_date"].ToString().Trim(),
+                            EntryDate = DateOnly
+                                            .FromDateTime(Convert.ToDateTime(reader["entry_date"]))
+                                            .ToString("dd/MM/yyyy"),
+                            CustomerName = reader["cust_fname"].ToString().Trim()
+                                           + " " + reader["cust_lname"].ToString().Trim(),
+
+                            // Three separate address fields
+                            Address1 = reader["address_1"].ToString().Trim(),
+                            Address2 = reader["address_2"].ToString().Trim(),
+                            Address3 = reader["address_3"].ToString().Trim(),
+
+                            Amount = amount,
+                            Postage = postage,
+                            BankCharges = bankCharges,
+                            Surcharge = surcharge,
+                            Percentage = Convert.ToDecimal(reader["percentage"]),
+                            Total = amount + postage + bankCharges + surcharge,
+                            Remark = reader["remark"].ToString().Trim(),
+                            MyAddCode = reader["myadd_code"].ToString().Trim(),
+                            Tel = reader["myadd_tel"].ToString().Trim(),
+                            OfficeDesc1 = reader["myadd_desc1"].ToString().Trim(),
+                            OfficeDesc2 = reader["myadd_desc2"].ToString().Trim()
+                        };
+                    }
+                }
+            }
+
+            return detail;
+        }
     }
 }

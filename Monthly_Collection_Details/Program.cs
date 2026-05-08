@@ -1,6 +1,8 @@
 ﻿using Monthly_Collection_Details.Services;
+using QuestPDF.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
+QuestPDF.Settings.License = LicenseType.Community;
 
 // Services
 builder.Services.AddControllers();
@@ -26,6 +28,7 @@ builder.Services.AddScoped<OutstandingCustomerService>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<Service1>();
 builder.Services.AddScoped<Service2>();
+builder.Services.AddScoped<PdfService>();
 
 builder.Services.AddEndpointsApiExplorer();
 
