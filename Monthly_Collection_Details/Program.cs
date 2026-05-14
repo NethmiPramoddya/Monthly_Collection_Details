@@ -29,6 +29,7 @@ builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<Service1>();
 builder.Services.AddScoped<Service2>();
 builder.Services.AddScoped<PdfService>();
+builder.Services.AddHttpClient();
 
 builder.Services.AddEndpointsApiExplorer();
 

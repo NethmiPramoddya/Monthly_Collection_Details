@@ -183,5 +183,136 @@ namespace Monthly_Collection_Details.Controllers
 
             return File(outputStream.ToArray(), "application/pdf", "grid.pdf");
         }
+
+        // ── GET api/returnchequecon1/bill-cycles ──────────────────────────
+        // Returns distinct bill cycles from prn_dat_1 for the dropdown
+        [HttpGet("bill-cycles")]
+        public async Task<IActionResult> GetBillCycles()
+        {
+            var data = await _service.GetBillCyclesAsync();
+
+            if (data == null || data.Count == 0)
+                return NotFound("No bill cycles found.");
+
+            return Ok(data);
+        }
+
+        // ── POST api/returnchequecon1/search-by-account ───────────────────
+        // Body: { "accountNo": "...", "receivedDate": "dd/MM/yyyy", "billCycle": 3 }
+        [HttpPost("search-by-account")]
+        public async Task<IActionResult> SearchByAccount(
+            [FromBody] Model1.SearchByAccountRequest request)
+        {
+            if (request == null || !ModelState.IsValid)
+                return BadRequest(ModelState);
+
+            // Parse dd/MM/yyyy safely — reject malformed dates
+            if (!DateTime.TryParseExact(
+                    request.ReceivedDate.Trim(),
+                    "dd/MM/yyyy",
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None,
+                    out DateTime receivedDate))
+            {
+                return BadRequest("ReceivedDate must be in dd/MM/yyyy format.");
+            }
+
+            var data = await _service.SearchByAccountAsync(
+                request.AccountNo.Trim(),
+                receivedDate,
+                request.BillCycle);
+
+            if (data == null || data.Count == 0)
+                return NotFound("No records found for the given account number.");
+
+            return Ok(data);
+        }
+
+        // ── POST api/returnchequecon1/search-by-cheque ────────────────────
+        // Body: { "chequeNo": "...", "bankCode": "...", "branchCode": "...", "billCycle": 3 }
+        [HttpPost("search-by-cheque")]
+        public async Task<IActionResult> SearchByCheque(
+            [FromBody] Model1.SearchByChequeRequest request)
+        {
+            if (request == null || !ModelState.IsValid)
+                return BadRequest(ModelState);
+
+            var data = await _service.SearchByChequeAsync(
+                request.ChequeNo.Trim(),
+                request.BankCode.Trim(),
+                request.BranchCode.Trim(),
+                request.BillCycle);
+
+            if (data == null || data.Count == 0)
+                return NotFound("No records found for the given cheque details.");
+
+            return Ok(data);
+        }
+
+        // ── TEMPORARY DEBUG — remove after confirming raw API response ────
+        [HttpGet("bill-cycles-raw")]
+        public async Task<IActionResult> GetBillCyclesRaw()
+        {
+            var client = new HttpClient();
+            var json = await client.GetStringAsync("http://10.128.1.227:5010/api/BulkEmail/billinfo");
+
+            // Returns the raw string so you can see exact field names
+            return Content(json, "application/json");
+        }
+
+        // ── POST api/returnchequecon1/search-90day-by-account ─────────────
+        // Body: { "accountNo": "...", "receivedDate": "dd/MM/yyyy", "billCycle": 448 }
+        // Returns all cheques for that account in the last 90 days
+        // grouped by ChequeNo → dropdown + cards
+        [HttpPost("search-90day-by-account")]
+        public async Task<IActionResult> Search90DayByAccount(
+            [FromBody] Model1.SearchByAccountRequest request)
+        {
+            if (request == null || !ModelState.IsValid)
+                return BadRequest(ModelState);
+
+            // Parse the POS received date — if blank/invalid, anchor to today
+            DateTime anchorDate = DateTime.Today;
+            if (!string.IsNullOrWhiteSpace(request.ReceivedDate))
+            {
+                if (!DateTime.TryParseExact(
+                        request.ReceivedDate.Trim(),
+                        "dd/MM/yyyy",
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        System.Globalization.DateTimeStyles.None,
+                        out anchorDate))
+                {
+                    return BadRequest("ReceivedDate must be in dd/MM/yyyy format.");
+                }
+            }
+
+            var result = await _service.Search90DayByAccountAsync(
+                request.AccountNo.Trim(),
+                anchorDate,
+                request.BillCycle);
+
+            // Return 200 with empty lists — frontend handles the empty state
+            return Ok(result);
+        }
+
+        // ── POST api/returnchequecon1/search-90day-by-cheque ──────────────
+        // Body: { "chequeNo": "...", "bankCode": "...", "branchCode": "...", "billCycle": 448 }
+        // Returns all accounts paid by this cheque in the last 90 days
+        // grouped by AccountNo → dropdown + cards
+        [HttpPost("search-90day-by-cheque")]
+        public async Task<IActionResult> Search90DayByCheque(
+            [FromBody] Model1.SearchByChequeRequest request)
+        {
+            if (request == null || !ModelState.IsValid)
+                return BadRequest(ModelState);
+
+            var result = await _service.Search90DayByChequeAsync(
+                request.ChequeNo.Trim(),
+                request.BankCode.Trim(),
+                request.BranchCode.Trim(),
+                request.BillCycle);
+
+            return Ok(result);
+        }
     }
 }

@@ -79,5 +79,133 @@ namespace Monthly_Collection_Details.Models
             public string OfficeDesc1 { get; set; }   // myadd_desc1 from cheqmy_address
             public string OfficeDesc2 { get; set; }   // myadd_desc2 from cheqmy_address
         }
+
+        // ──────────────────────────────────────────────────────────────────
+        // Request: Search by Account No
+        // ──────────────────────────────────────────────────────────────────
+        public class SearchByAccountRequest
+        {
+            [Required]
+            public string AccountNo { get; set; } = string.Empty;
+
+            [Required]
+            public string ReceivedDate { get; set; } = string.Empty;   // dd/MM/yyyy
+
+            [Required]
+            public int BillCycle { get; set; }
+        }
+
+        // ──────────────────────────────────────────────────────────────────
+        // Request: Search by Cheque No
+        // ──────────────────────────────────────────────────────────────────
+        public class SearchByChequeRequest
+        {
+            [Required]
+            public string ChequeNo { get; set; } = string.Empty;
+
+            [Required]
+            public string BankCode { get; set; } = string.Empty;
+
+            [Required]
+            public string BranchCode { get; set; } = string.Empty;
+
+            [Required]
+            public int BillCycle { get; set; }
+        }
+
+        // ──────────────────────────────────────────────────────────────────
+        // Response: New Defaulter search result
+        // ──────────────────────────────────────────────────────────────────
+        public class NewDefaulterResult
+        {
+            public string CustomerName { get; set; } = string.Empty;
+            public string Address { get; set; } = string.Empty;
+            public string Area { get; set; } = string.Empty;
+            public string AreaCode { get; set; } = string.Empty;
+            public string ChequeNo { get; set; } = string.Empty;
+            public decimal Amount { get; set; }
+            public string AccountNo { get; set; } = string.Empty;
+            public string Branch { get; set; } = string.Empty;
+            public string BankCode { get; set; } = string.Empty;
+        }
+
+        // ──────────────────────────────────────────────────────────────────
+        // Bill Cycle dropdown item
+        // ──────────────────────────────────────────────────────────────────
+        public class BillCycleRecord
+        {
+            public int BillCycle { get; set; }
+            public string DisplayName { get; set; } = string.Empty;
+        }
+
+        // Internal helper — never exposed via API
+        public class CustomerInfo
+        {
+            public string CustomerName { get; set; } = string.Empty;
+            public string Address { get; set; } = string.Empty;
+            public string Area { get; set; } = string.Empty;
+            public string AreaCode { get; set; } = string.Empty;
+        }
+
+        // ──────────────────────────────────────────────────────────────────
+        // Raw DTO — matches exact field names from the external bill cycle API
+        // http://10.128.1.227:5010/api/BulkEmail/billinfo
+        // Never exposed via our own API — mapped to BillCycleRecord instead
+        // ──────────────────────────────────────────────────────────────────
+        public class BillCycleApiDto
+        {
+            public string bill_cycle { get; set; } = string.Empty;  // e.g. "105"
+            public string bill_mnth { get; set; } = string.Empty;  // e.g. "1997 May"
+        }
+
+        // ──────────────────────────────────────────────────────────────────
+        // 90-day Cheque Transaction Search models
+        // ──────────────────────────────────────────────────────────────────
+
+        // Raw row fetched from chq_mnyord for 90-day window
+        public class ChequeTransactionRow
+        {
+            public string AccountNo { get; set; } = string.Empty;
+            public string ChequeNo { get; set; } = string.Empty;
+            public string BankCode { get; set; } = string.Empty;
+            public string BranchCode { get; set; } = string.Empty;
+            public decimal Amount { get; set; }
+            public string ChequeDate { get; set; } = string.Empty;  // formatted dd/MM/yyyy
+            public string ReturnReason { get; set; } = string.Empty;
+        }
+
+        // One item in the results dropdown
+        public class ChequeDropdownItem
+        {
+            public string Label { get; set; } = string.Empty;   // text shown in dropdown
+            public string GroupKey { get; set; } = string.Empty;   // ChequeNo (account mode) or AccountNo (cheque mode)
+            public List<ChequeTransactionRow> Transactions { get; set; } = new();
+        }
+
+        // Customer info enriched from prn_dat_1 — used inside the detail card
+        public class ChequeCustomerInfo
+        {
+            public string AccountNo { get; set; } = string.Empty;
+            public string CustomerName { get; set; } = string.Empty;
+            public string Address { get; set; } = string.Empty;
+            public string Area { get; set; } = string.Empty;
+        }
+
+        // One result card — shown when user selects a dropdown item
+        public class ChequeDetailCard
+        {
+            public string GroupKey { get; set; } = string.Empty;
+            public string Branch { get; set; } = string.Empty;
+            public ChequeCustomerInfo? Customer { get; set; }
+            public List<ChequeTransactionRow> Transactions { get; set; } = new();
+        }
+
+        // Full API response for both search modes
+        public class ChequeSearchResponse
+        {
+            public string Mode { get; set; } = string.Empty;   // "account" | "cheque"
+            public List<ChequeDropdownItem> DropdownItems { get; set; } = new();
+            public List<ChequeDetailCard> Cards { get; set; } = new();
+        }
     }
 }
