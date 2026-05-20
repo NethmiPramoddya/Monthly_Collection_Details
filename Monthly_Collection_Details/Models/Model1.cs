@@ -207,5 +207,57 @@ namespace Monthly_Collection_Details.Models
             public List<ChequeDropdownItem> DropdownItems { get; set; } = new();
             public List<ChequeDetailCard> Cards { get; set; } = new();
         }
+
+        //insertion
+        // ──────────────────────────────────────────────────────────────────
+        // ▼▼▼ NEW: Remark dropdown item — from cheqmy_remarks table ▼▼▼
+        // ──────────────────────────────────────────────────────────────────
+        public class RemarkRecord
+        {
+            public string RemarkCode { get; set; } = string.Empty;  // cheqremark_code
+            public string RemarkText { get; set; } = string.Empty;  // remark
+        }
+
+        // ──────────────────────────────────────────────────────────────────
+        // ▼▼▼ NEW: Charges config — from cheqmy_chargers table ▼▼▼
+        // Postage, bank charges, surcharge %, and minimum months are
+        // stored centrally so every branch uses the same values.
+        // ──────────────────────────────────────────────────────────────────
+        public class ChargesConfig
+        {
+            public decimal Postage { get; set; }
+            public decimal BankCharges { get; set; }
+            public decimal Percentage { get; set; }  // surcharge %
+            public int NoMonths { get; set; }  // min months to block
+        }
+
+        // ──────────────────────────────────────────────────────────────────
+        // ▼▼▼ NEW: Insert request — saves a new defaulter to cheqmy_details ▼▼▼
+        // Frontend sends this after the user fills the "Save Cheque Details" form.
+        // myadd_code comes from the authenticated user's session (login response).
+        // ──────────────────────────────────────────────────────────────────
+        public class SaveChequeDetailsRequest
+        {
+            [Required] public string MyAddCode { get; set; } = string.Empty; // from login
+            [Required] public string MyBranch { get; set; } = string.Empty; // my_branch
+            [Required] public string AcctNumber { get; set; } = string.Empty; // acct_number
+            [Required] public string CheqNo { get; set; } = string.Empty; // cheq_no
+            [Required] public decimal Amount { get; set; }                 // trans_amt
+            [Required] public string CheqDate { get; set; } = string.Empty; // dd/MM/yyyy
+            [Required] public string RemarkCode { get; set; } = string.Empty; // cheqremark_code
+            [Required] public decimal Postage { get; set; }
+            [Required] public decimal BankCharges { get; set; }
+            [Required] public decimal Surcharge { get; set; }  // calculated: amount * percentage / 100
+            [Required] public decimal Percentage { get; set; }
+            [Required] public int NoMonths { get; set; }  // must be >= 3
+
+            // Pre-filled from customer lookup — editable by user
+            [Required] public string CustFname { get; set; } = string.Empty;
+            [Required] public string CustLname { get; set; } = string.Empty;
+            [Required] public string Address1 { get; set; } = string.Empty;
+            public string Address2 { get; set; } = string.Empty;
+            public string Address3 { get; set; } = string.Empty;
+            public string AreaName { get; set; } = string.Empty;
+        }
     }
 }

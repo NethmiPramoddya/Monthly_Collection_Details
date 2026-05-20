@@ -314,5 +314,74 @@ namespace Monthly_Collection_Details.Controllers
 
             return Ok(result);
         }
+
+        //insertion
+        // ── GET api/returnchequecon1/remarks ──────────────────────────────
+        // ▼▼▼ NEW ▼▼▼
+        // Returns all remark options for the Remark dropdown in the insert form
+        [HttpGet("remarks")]
+        public async Task<IActionResult> GetRemarks()
+        {
+            var data = await _service.GetRemarksAsync();
+
+            if (data == null || data.Count == 0)
+                return NotFound("No remarks found.");
+
+            return Ok(data);
+        }
+
+        // ── GET api/returnchequecon1/charges-config ───────────────────────
+        // ▼▼▼ NEW ▼▼▼
+        // Returns postage, bank charges, surcharge %, and no_months from
+        // cheqmy_chargers so the insert form can pre-fill those fields
+        [HttpGet("charges-config")]
+        public async Task<IActionResult> GetChargesConfig()
+        {
+            var config = await _service.GetChargesConfigAsync();
+
+            if (config == null)
+                return NotFound("No charges configuration found.");
+
+            return Ok(config);
+        }
+
+        // ── POST api/returnchequecon1/save-cheque-details ─────────────────
+        // ▼▼▼ NEW ▼▼▼
+        // Saves a new defaulter record into cheqmy_details.
+        // Returns the generated notice number (my_code) on success.
+        [HttpPost("save-cheque-details")]
+        public async Task<IActionResult> SaveChequeDetails(
+            [FromBody] Model1.SaveChequeDetailsRequest request)
+        {
+            if (request == null || !ModelState.IsValid)
+                return BadRequest(ModelState);
+
+            // Validate no_months minimum (same rule as legacy system)
+            if (request.NoMonths < 3)
+                return BadRequest("No of months must be at least 3.");
+
+            // Validate cheq_date format
+            if (!DateTime.TryParseExact(
+                    request.CheqDate.Trim(),
+                    "dd/MM/yyyy",
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None,
+                    out _))
+            {
+                return BadRequest("CheqDate must be in dd/MM/yyyy format.");
+            }
+
+            try
+            {
+                string noticeNo = await _service.SaveChequeDetailsAsync(request);
+                return Ok(new { noticeNo, message = "Cheque details saved successfully." });
+            }
+            catch (InvalidOperationException ex)
+            {
+                // Duplicate cheque detected in service layer
+                return Conflict(ex.Message);
+            }
+        }
+
     }
 }
