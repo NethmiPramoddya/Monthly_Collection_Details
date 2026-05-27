@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 
 namespace Monthly_Collection_Details.Models
 {
@@ -67,6 +68,7 @@ namespace Monthly_Collection_Details.Models
             public string Address1 { get; set; }   // address_1
             public string Address2 { get; set; }   // address_2
             public string Address3 { get; set; }   // address_3
+            public string Area { get; set; }   // area_name
             public decimal Amount { get; set; }   // amount
             public decimal Postage { get; set; }   // postage
             public decimal BankCharges { get; set; }   // bank_charges
@@ -76,8 +78,11 @@ namespace Monthly_Collection_Details.Models
             public string Remark { get; set; }   // remark
             public string MyAddCode { get; set; }   // myadd_code
             public string Tel { get; set; }   // myadd_tel from cheqmy_address
-            public string OfficeDesc1 { get; set; }   // myadd_desc1 from cheqmy_address
-            public string OfficeDesc2 { get; set; }   // myadd_desc2 from cheqmy_address
+            public string OfficeDesc1 { get; set; }
+            public string OfficeDesc2 { get; set; }
+            public string OfficeDesc3 { get; set; }   // myadd_desc3 — street address
+            public string OfficeDesc4 { get; set; }   // myadd_desc4 — city/postal
+            public string MyBranch { get; set; }   // my_branch from cheqmy_details
         }
 
         // ──────────────────────────────────────────────────────────────────
@@ -239,7 +244,8 @@ namespace Monthly_Collection_Details.Models
         public class SaveChequeDetailsRequest
         {
             [Required] public string MyAddCode { get; set; } = string.Empty; // from login
-            [Required] public string MyBranch { get; set; } = string.Empty; // my_branch
+            [Required] public string MyCode { get; set; } = string.Empty; // user-entered notice no
+            [JsonIgnore] public string MyBranch { get; set; } = string.Empty; // optional, resolved from cheqmy_no
             [Required] public string AcctNumber { get; set; } = string.Empty; // acct_number
             [Required] public string CheqNo { get; set; } = string.Empty; // cheq_no
             [Required] public decimal Amount { get; set; }                 // trans_amt
@@ -253,7 +259,7 @@ namespace Monthly_Collection_Details.Models
 
             // Pre-filled from customer lookup — editable by user
             [Required] public string CustFname { get; set; } = string.Empty;
-            [Required] public string CustLname { get; set; } = string.Empty;
+             public string CustLname { get; set; } = string.Empty;
             [Required] public string Address1 { get; set; } = string.Empty;
             public string Address2 { get; set; } = string.Empty;
             public string Address3 { get; set; } = string.Empty;

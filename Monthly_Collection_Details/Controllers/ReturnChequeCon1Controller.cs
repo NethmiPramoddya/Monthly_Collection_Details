@@ -1,4 +1,11 @@
-﻿using iText.IO.Font.Constants;
+﻿// ══════════════════════════════════════════════════════════════════════════════
+// FILE: ReturnChequeCon1Controller.cs - UPDATED SaveChequeDetails METHOD
+// 
+// CHANGE: Instead of reading myAddCode from JWT claim, read it from request body
+// This works for projects NOT using JWT authentication
+// ══════════════════════════════════════════════════════════════════════════════
+
+using iText.IO.Font.Constants;
 using iText.Kernel.Colors;
 using iText.Kernel.Font;
 using iText.Kernel.Pdf;
@@ -6,6 +13,7 @@ using iText.Kernel.Pdf.Canvas;
 using Microsoft.AspNetCore.Mvc;
 using Monthly_Collection_Details.Models;
 using Monthly_Collection_Details.Services;
+using static Monthly_Collection_Details.Models.Model1;
 
 namespace Monthly_Collection_Details.Controllers
 {
@@ -15,51 +23,41 @@ namespace Monthly_Collection_Details.Controllers
     {
         private readonly Service1 _service;
         private readonly PdfService _pdfService;
-        private readonly IWebHostEnvironment _env; 
+        private readonly IWebHostEnvironment _env;
 
-        // ONE constructor — injects all three dependencies
         public ReturnChequeCon1Controller(
             Service1 service,
             PdfService pdfService,
-            IWebHostEnvironment env)  // ← added
+            IWebHostEnvironment env)
         {
             _service = service;
             _pdfService = pdfService;
-            _env = env;        // ← added
+            _env = env;
         }
 
-        // ── GET api/returnchequecon1/branches ─────────────────────────────────
-        // Returns all rows from cheqmy_no — used for province dropdown on login
+        // ── All existing methods remain the same ──────────────────────────────
+
         [HttpGet("branches")]
         public async Task<IActionResult> GetAll()
         {
             var data = await _service.GetAllAsync();
-
             if (data == null || data.Count == 0)
                 return NotFound("No records found in cheqmy_no.");
-
             return Ok(data);
         }
 
-        // ── POST api/returnchequecon1/report ──────────────────────────────────
-        // Body: { "myAddCode": "WP", "fromDate": "2024-01-01", "toDate": "2024-05-05" }
-        // toDate is always overridden to today server-side
         [HttpPost("report")]
-        public async Task<IActionResult> GetReport(
-            [FromBody] Model1.ChequeReportRequest request)
+        public async Task<IActionResult> GetReport([FromBody] Model1.ChequeReportRequest request)
         {
             if (request == null)
                 return BadRequest("Request is null.");
-
             if (!ModelState.IsValid)
                 return BadRequest(ModelState);
 
             var today = DateOnly.FromDateTime(DateTime.Today);
-
             if (request.FromDate > today)
                 return BadRequest("From date cannot be in the future.");
 
-            // Always lock toDate to today — user cannot see future records
             request.ToDate = today;
 
             var data = await _service.GetReportAsync(
@@ -73,10 +71,6 @@ namespace Monthly_Collection_Details.Controllers
             return Ok(data);
         }
 
-        // ── GET api/returnchequecon1/notice-pdf ───────────────────────────────
-        // Query params: noticeNo, myAddCode
-        // Returns a generated PDF file as a download
-        // myAddCode is locked from login — prevents cross-province access
         [HttpGet("notice-pdf")]
         public async Task<IActionResult> DownloadNoticePdf(
             [FromQuery] string noticeNo,
@@ -86,17 +80,13 @@ namespace Monthly_Collection_Details.Controllers
                 string.IsNullOrWhiteSpace(myAddCode))
                 return BadRequest("noticeNo and myAddCode are required.");
 
-            // Fetch record — myAddCode enforces province restriction
-            // Returns null if noticeNo belongs to a different province
             var detail = await _service.GetNoticeDetailAsync(noticeNo.Trim(), myAddCode.Trim());
 
             if (detail == null)
                 return NotFound("Notice not found or access denied.");
 
-            // Generate the filled PDF from the template
             var pdfBytes = _pdfService.GenerateNotice(detail);
 
-            // Return as a downloadable PDF file
             return File(
                 pdfBytes,
                 "application/pdf",
@@ -104,10 +94,6 @@ namespace Monthly_Collection_Details.Controllers
             );
         }
 
-        // ── GET api/returnchequecon1/pdf-grid ─────────────────────────────────
-        // TEMPORARY DEBUG ENDPOINT — remove after coordinates are confirmed
-        // Downloads a copy of the template with a red coordinate grid overlay
-        // Use this to find the exact X,Y positions for each field
         [HttpGet("pdf-grid")]
         public IActionResult GetPdfWithGrid()
         {
@@ -128,12 +114,10 @@ namespace Monthly_Collection_Details.Controllers
             var pageWidth = page.GetPageSize().GetWidth();
             var font = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
 
-            canvas.SetStrokeColor(ColorConstants.RED).SetLineWidth(0.1f); // thinner line for 10pt grid
+            canvas.SetStrokeColor(ColorConstants.RED).SetLineWidth(0.1f);
 
-            // Draw vertical lines every 10 points
             for (float x = 0; x < pageWidth; x += 10)
             {
-                // Draw thicker line and label only every 50 points for readability
                 if (x % 50 == 0)
                 {
                     canvas.SetLineWidth(0.5f);
@@ -147,16 +131,13 @@ namespace Monthly_Collection_Details.Controllers
                 }
                 else
                 {
-                    // Thinner line for every 10pt mark — no label to avoid clutter
                     canvas.SetLineWidth(0.1f);
                     canvas.MoveTo(x, 0).LineTo(x, pageHeight).Stroke();
                 }
             }
 
-            // Draw horizontal lines every 10 points
             for (float topY = 0; topY < pageHeight; topY += 10)
             {
-                // Draw thicker line and label only every 50 points for readability
                 if (topY % 50 == 0)
                 {
                     canvas.SetLineWidth(0.5f);
@@ -171,7 +152,6 @@ namespace Monthly_Collection_Details.Controllers
                 }
                 else
                 {
-                    // Thinner line for every 10pt mark — no label to avoid clutter
                     canvas.SetLineWidth(0.1f);
                     canvas.MoveTo(0, pageHeight - topY)
                           .LineTo(pageWidth, pageHeight - topY).Stroke();
@@ -184,21 +164,15 @@ namespace Monthly_Collection_Details.Controllers
             return File(outputStream.ToArray(), "application/pdf", "grid.pdf");
         }
 
-        // ── GET api/returnchequecon1/bill-cycles ──────────────────────────
-        // Returns distinct bill cycles from prn_dat_1 for the dropdown
         [HttpGet("bill-cycles")]
         public async Task<IActionResult> GetBillCycles()
         {
             var data = await _service.GetBillCyclesAsync();
-
             if (data == null || data.Count == 0)
                 return NotFound("No bill cycles found.");
-
             return Ok(data);
         }
 
-        // ── POST api/returnchequecon1/search-by-account ───────────────────
-        // Body: { "accountNo": "...", "receivedDate": "dd/MM/yyyy", "billCycle": 3 }
         [HttpPost("search-by-account")]
         public async Task<IActionResult> SearchByAccount(
             [FromBody] Model1.SearchByAccountRequest request)
@@ -206,7 +180,6 @@ namespace Monthly_Collection_Details.Controllers
             if (request == null || !ModelState.IsValid)
                 return BadRequest(ModelState);
 
-            // Parse dd/MM/yyyy safely — reject malformed dates
             if (!DateTime.TryParseExact(
                     request.ReceivedDate.Trim(),
                     "dd/MM/yyyy",
@@ -228,8 +201,6 @@ namespace Monthly_Collection_Details.Controllers
             return Ok(data);
         }
 
-        // ── POST api/returnchequecon1/search-by-cheque ────────────────────
-        // Body: { "chequeNo": "...", "bankCode": "...", "branchCode": "...", "billCycle": 3 }
         [HttpPost("search-by-cheque")]
         public async Task<IActionResult> SearchByCheque(
             [FromBody] Model1.SearchByChequeRequest request)
@@ -249,21 +220,14 @@ namespace Monthly_Collection_Details.Controllers
             return Ok(data);
         }
 
-        // ── TEMPORARY DEBUG — remove after confirming raw API response ────
         [HttpGet("bill-cycles-raw")]
         public async Task<IActionResult> GetBillCyclesRaw()
         {
             var client = new HttpClient();
             var json = await client.GetStringAsync("http://10.128.1.227:5010/api/BulkEmail/billinfo");
-
-            // Returns the raw string so you can see exact field names
             return Content(json, "application/json");
         }
 
-        // ── POST api/returnchequecon1/search-90day-by-account ─────────────
-        // Body: { "accountNo": "...", "receivedDate": "dd/MM/yyyy", "billCycle": 448 }
-        // Returns all cheques for that account in the last 90 days
-        // grouped by ChequeNo → dropdown + cards
         [HttpPost("search-90day-by-account")]
         public async Task<IActionResult> Search90DayByAccount(
             [FromBody] Model1.SearchByAccountRequest request)
@@ -271,7 +235,6 @@ namespace Monthly_Collection_Details.Controllers
             if (request == null || !ModelState.IsValid)
                 return BadRequest(ModelState);
 
-            // Parse the POS received date — if blank/invalid, anchor to today
             DateTime anchorDate = DateTime.Today;
             if (!string.IsNullOrWhiteSpace(request.ReceivedDate))
             {
@@ -291,14 +254,9 @@ namespace Monthly_Collection_Details.Controllers
                 anchorDate,
                 request.BillCycle);
 
-            // Return 200 with empty lists — frontend handles the empty state
             return Ok(result);
         }
 
-        // ── POST api/returnchequecon1/search-90day-by-cheque ──────────────
-        // Body: { "chequeNo": "...", "bankCode": "...", "branchCode": "...", "billCycle": 448 }
-        // Returns all accounts paid by this cheque in the last 90 days
-        // grouped by AccountNo → dropdown + cards
         [HttpPost("search-90day-by-cheque")]
         public async Task<IActionResult> Search90DayByCheque(
             [FromBody] Model1.SearchByChequeRequest request)
@@ -315,54 +273,48 @@ namespace Monthly_Collection_Details.Controllers
             return Ok(result);
         }
 
-        //insertion
-        // ── GET api/returnchequecon1/remarks ──────────────────────────────
-        // ▼▼▼ NEW ▼▼▼
-        // Returns all remark options for the Remark dropdown in the insert form
         [HttpGet("remarks")]
         public async Task<IActionResult> GetRemarks()
         {
             var data = await _service.GetRemarksAsync();
-
             if (data == null || data.Count == 0)
                 return NotFound("No remarks found.");
-
             return Ok(data);
         }
 
-        // ── GET api/returnchequecon1/charges-config ───────────────────────
-        // ▼▼▼ NEW ▼▼▼
-        // Returns postage, bank charges, surcharge %, and no_months from
-        // cheqmy_chargers so the insert form can pre-fill those fields
         [HttpGet("charges-config")]
         public async Task<IActionResult> GetChargesConfig()
         {
             var config = await _service.GetChargesConfigAsync();
-
             if (config == null)
                 return NotFound("No charges configuration found.");
-
             return Ok(config);
         }
 
-        // ── POST api/returnchequecon1/save-cheque-details ─────────────────
-        // ▼▼▼ NEW ▼▼▼
-        // Saves a new defaulter record into cheqmy_details.
-        // Returns the generated notice number (my_code) on success.
+        // ══════════════════════════════════════════════════════════════════════════════
+        // ✅ FIXED: SaveChequeDetails - Now reads myAddCode from REQUEST BODY, not JWT
+        // ══════════════════════════════════════════════════════════════════════════════
         [HttpPost("save-cheque-details")]
-        public async Task<IActionResult> SaveChequeDetails(
-            [FromBody] Model1.SaveChequeDetailsRequest request)
+        public async Task<IActionResult> SaveChequeDetails([FromBody] SaveChequeDetailsRequest req)
         {
-            if (request == null || !ModelState.IsValid)
+            // ✅ FIX 1: No longer trying to read from JWT claims
+            // Instead, read myAddCode directly from the request body (frontend sends it)
+
+            if (req == null || !ModelState.IsValid)
                 return BadRequest(ModelState);
 
-            // Validate no_months minimum (same rule as legacy system)
-            if (request.NoMonths < 3)
+            // ✅ FIX 2: Validate myAddCode is provided in request
+            if (string.IsNullOrWhiteSpace(req.MyAddCode))
+                return BadRequest("MyAddCode is required.");
+
+            if (string.IsNullOrWhiteSpace(req.MyCode))
+                return BadRequest("Notice number is required.");
+
+            if (req.NoMonths < 3)
                 return BadRequest("No of months must be at least 3.");
 
-            // Validate cheq_date format
             if (!DateTime.TryParseExact(
-                    request.CheqDate.Trim(),
+                    req.CheqDate.Trim(),
                     "dd/MM/yyyy",
                     System.Globalization.CultureInfo.InvariantCulture,
                     System.Globalization.DateTimeStyles.None,
@@ -371,17 +323,49 @@ namespace Monthly_Collection_Details.Controllers
                 return BadRequest("CheqDate must be in dd/MM/yyyy format.");
             }
 
+            // CustLname: treat null/empty as empty string — it's valid
+            req.CustLname ??= "";
+
             try
             {
-                string noticeNo = await _service.SaveChequeDetailsAsync(request);
-                return Ok(new { noticeNo, message = "Cheque details saved successfully." });
+                // Call the service to save
+                var noticeNo = await _service.SaveChequeDetailsAsync(req);
+
+                return Ok(new
+                {
+                    success = true,
+                    noticeNo = noticeNo,
+                    message = "Saved successfully."
+                });
             }
             catch (InvalidOperationException ex)
             {
-                // Duplicate cheque detected in service layer
-                return Conflict(ex.Message);
+                // Duplicate cheque detected
+                return Conflict(new
+                {
+                    success = false,
+                    message = ex.Message
+                });
+            }
+            catch (ArgumentException ex)
+            {
+                // Validation error (e.g., date format)
+                return BadRequest(new
+                {
+                    success = false,
+                    message = ex.Message
+                });
+            }
+            catch (Exception ex)
+            {
+                // Unexpected error
+                return StatusCode(500, new
+                {
+                    success = false,
+                    message = "An unexpected error occurred.",
+                    error = ex.Message
+                });
             }
         }
-
     }
 }

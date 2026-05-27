@@ -1,6 +1,8 @@
 ﻿using Informix.Net.Core;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Monthly_Collection_Details.Models;
+using System.Globalization;
 
 namespace Monthly_Collection_Details.Services
 {
@@ -10,13 +12,15 @@ namespace Monthly_Collection_Details.Services
         private readonly string _connectionString2;  // pmnt_consld      — chq_mnyord
         private readonly HttpClient _httpClient;
         private readonly string _billCycleUrl;
+        private readonly ILogger<Service1> _logger;
 
-        public Service1(IConfiguration configuration)
+        public Service1(IConfiguration configuration, ILogger<Service1> logger)
         {
             _connectionString = configuration.GetConnectionString("LargestCustomers");
             _connectionString2 = configuration.GetConnectionString("pmnt_consld");
             _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
             _billCycleUrl = configuration["ExternalApis:BillCycleUrl"];
+            _logger = logger;
         }
 
         // ──────────────────────────────────────────────────────────────────
@@ -93,6 +97,7 @@ namespace Monthly_Collection_Details.Services
                 WHERE d.myadd_code  = ?
                   AND d.entry_date >= ?
                   AND d.entry_date <= ?
+                  AND d.confrm      = 'Y'
                 ORDER BY d.entry_date, d.my_branch, d.my_code";
 
             using var cmd = new IfxCommand(sql, con) { CommandTimeout = 10 };
@@ -157,9 +162,13 @@ namespace Monthly_Collection_Details.Services
                     d.percentage,
                     d.remark,
                     d.myadd_code,
+                    d.area_name,    
                     a.myadd_tel,
                     a.myadd_desc1,
-                    a.myadd_desc2
+                    a.myadd_desc2,
+                    a.myadd_desc3,
+                    a.myadd_desc4,
+                    d.my_branch
                 FROM cheqmy_details d
                 INNER JOIN cheqmy_address a ON a.myadd_code = d.myadd_code
                 WHERE d.my_code    = ?
@@ -192,6 +201,7 @@ namespace Monthly_Collection_Details.Services
                 Address1 = reader["address_1"].ToString()?.Trim() ?? "",
                 Address2 = reader["address_2"].ToString()?.Trim() ?? "",
                 Address3 = reader["address_3"].ToString()?.Trim() ?? "",
+                Area = reader["area_name"].ToString()?.Trim() ?? "",
                 Amount = amount,
                 Postage = postage,
                 BankCharges = bankCharges,
@@ -202,7 +212,10 @@ namespace Monthly_Collection_Details.Services
                 MyAddCode = reader["myadd_code"].ToString()?.Trim() ?? "",
                 Tel = reader["myadd_tel"].ToString()?.Trim() ?? "",
                 OfficeDesc1 = reader["myadd_desc1"].ToString()?.Trim() ?? "",
-                OfficeDesc2 = reader["myadd_desc2"].ToString()?.Trim() ?? ""
+                OfficeDesc2 = reader["myadd_desc2"].ToString()?.Trim() ?? "",
+                OfficeDesc3 = reader["myadd_desc3"].ToString()?.Trim() ?? "",
+                OfficeDesc4 = reader["myadd_desc4"].ToString()?.Trim() ?? "",
+                MyBranch = reader["my_branch"].ToString()?.Trim() ?? "",
             };
         }
 
@@ -724,82 +737,133 @@ namespace Monthly_Collection_Details.Services
 
         // ──────────────────────────────────────────────────────────────────
         // ▼▼▼ NEW: Save cheque defaulter to cheqmy_details ▼▼▼
-        // Generates the notice number (my_code) by finding the current MAX
-        // and incrementing by 1 — same logic as the legacy VB.NET system.
         // Database: LargestCustomers (_connectionString)
-        // Returns the generated notice number so the frontend can display it.
+        // Returns the provided notice number so the frontend can display it.
         // ──────────────────────────────────────────────────────────────────
         public async Task<string> SaveChequeDetailsAsync(Model1.SaveChequeDetailsRequest req)
         {
             using var con = new IfxConnection(_connectionString);
             await con.OpenAsync();
 
-            // ── Step 1: Check for duplicate (same branch + cheque already entered) ──
+            // ── Step 1: Validate inputs ─────────────────────────────────────────────
+            if (string.IsNullOrWhiteSpace(req.MyAddCode))
+                throw new ArgumentException("MyAddCode is required.");
+
+            if (string.IsNullOrWhiteSpace(req.MyCode))
+                throw new ArgumentException("Notice number (MyCode) is required.");
+
+            if (string.IsNullOrWhiteSpace(req.AcctNumber))
+                throw new ArgumentException("Account number is required.");
+
+            if (string.IsNullOrWhiteSpace(req.CheqNo))
+                throw new ArgumentException("Cheque number is required.");
+
+            if (string.IsNullOrWhiteSpace(req.RemarkCode))
+                throw new ArgumentException("Remark code is required.");
+
+            if (string.IsNullOrWhiteSpace(req.CustFname))
+                throw new ArgumentException("Customer first name is required.");
+
+            if (string.IsNullOrWhiteSpace(req.Address1))
+                throw new ArgumentException("Address line 1 is required.");
+
+            if (req.Amount <= 0)
+                throw new ArgumentException("Amount must be greater than zero.");
+
+            if (req.NoMonths < 3)
+                throw new ArgumentException("No of months must be at least 3.");
+
+            if (!DateTime.TryParseExact(
+                    req.CheqDate.Trim(),
+                    "dd/MM/yyyy",
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.None,
+                    out _))
+            {
+                throw new ArgumentException("CheqDate must be in dd/MM/yyyy format.");
+            }
+
+            // ── Step 2: Resolve my_branch from cheqmy_no ───────────────────────────
+            const string branchSql = @"
+        SELECT FIRST 1 my_branch
+        FROM cheqmy_no
+        WHERE myadd_code = ?";
+
+            string myBranch;
+            using (var branchCmd = new IfxCommand(branchSql, con) { CommandTimeout = 5 })
+            {
+                branchCmd.Parameters.Add(CreateParameter(IfxType.Char, req.MyAddCode.Trim().ToUpper(), 20));
+                var branchResult = await branchCmd.ExecuteScalarAsync();
+                myBranch = branchResult?.ToString()?.Trim() ?? string.Empty;
+            }
+
+            if (string.IsNullOrWhiteSpace(myBranch))
+                throw new ArgumentException("Invalid MyAddCode. Branch not found.");
+
+            // ── Step 3: Duplicate check (cheque number or notice number) ───────────
             const string dupSql = @"
-        SELECT COUNT(*) AS cnt
+        SELECT COUNT(*)
         FROM cheqmy_details
-        WHERE my_branch = ?
-          AND cheq_no   = ?";
+        WHERE myadd_code = ?
+          AND (my_code = ? OR (my_branch = ? AND cheq_no = ?))";
 
             using (var dupCmd = new IfxCommand(dupSql, con) { CommandTimeout = 5 })
             {
-                dupCmd.Parameters.Add(new IfxParameter { Value = req.MyBranch.Trim() });
-                dupCmd.Parameters.Add(new IfxParameter { Value = req.CheqNo.Trim() });
+                dupCmd.Parameters.Add(CreateParameter(IfxType.Char, req.MyAddCode.Trim().ToUpper(), 20));
+                dupCmd.Parameters.Add(CreateParameter(IfxType.Char, req.MyCode.Trim(), 20));
+                dupCmd.Parameters.Add(CreateParameter(IfxType.Char, myBranch, 30));
+                dupCmd.Parameters.Add(CreateParameter(IfxType.Char, req.CheqNo.Trim(), 10));
 
                 var dupResult = await dupCmd.ExecuteScalarAsync();
-                int dupCount = Convert.ToInt32(dupResult);
-
-                if (dupCount > 0)
-                    throw new InvalidOperationException(
-                        $"Cheque {req.CheqNo} for branch {req.MyBranch} is already recorded.");
-            }
-
-            // ── Step 2: Generate next notice number (my_code) ──────────────────────
-            // Format: my_branch / YYYY / MM / SEQ  e.g. 6/2009/04/42
-            // We take the MAX seq for this branch+year+month and increment it.
-            string year = DateTime.Today.Year.ToString();
-            string month = DateTime.Today.Month.ToString("D2");
-
-            string maxSql = $@"
-        SELECT MAX(my_code) AS max_code
-        FROM cheqmy_details
-        WHERE my_branch  = ?
-          AND myadd_code = ?";
-
-            // We derive the next code outside the query because Informix
-            // doesn't support sequence parsing in SQL easily.
-            int nextSeq = 1;
-
-            using (var maxCmd = new IfxCommand(maxSql, con) { CommandTimeout = 5 })
-            {
-                maxCmd.Parameters.Add(new IfxParameter { Value = req.MyBranch.Trim() });
-                maxCmd.Parameters.Add(new IfxParameter { Value = req.MyAddCode.Trim().ToUpper() });
-
-                var raw = await maxCmd.ExecuteScalarAsync();
-                if (raw != null && raw != DBNull.Value)
+                if (GetScalarInt(dupResult) > 0)
                 {
-                    // my_code format: "6/2009/04/41" → last segment is the seq
-                    var parts = raw.ToString()!.Split('/');
-                    if (parts.Length == 4 && int.TryParse(parts[3], out int lastSeq))
-                        nextSeq = lastSeq + 1;
+                    _logger.LogWarning(
+                        "Duplicate cheque defaulter detected. NoticeNo {NoticeNo}, ChequeNo {ChequeNo}, MyAddCode {MyAddCode}",
+                        req.MyCode.Trim(),
+                        req.CheqNo.Trim(),
+                        req.MyAddCode.Trim());
+                    throw new InvalidOperationException(
+                        $"Notice number {req.MyCode} or cheque {req.CheqNo} is already recorded.");
                 }
             }
 
-            string myCode = $"{req.MyBranch.Trim()}/{year}/{month}/{nextSeq}";
+            // ── Step 4: Resolve area_name from prn_dat_1 → areas ───────────────────
+            var resolvedAreaName = await ResolveAreaNameAsync(con, req.AcctNumber.Trim());
+            if (string.IsNullOrWhiteSpace(resolvedAreaName))
+                resolvedAreaName = req.AreaName.Trim();
 
-            // ── Step 3: Insert ─────────────────────────────────────────────────────
+            // ── Step 5: Normalize and cap values to schema limits ─────────────────
+            static string Cap(string s, int max) =>
+                s.Length > max ? s[..max] : s;
+
+            var myAddCode = Cap(req.MyAddCode.Trim().ToUpper(), 20);
+            var myBranchCap = Cap(myBranch, 30);
+            var myCodeCap = Cap(req.MyCode.Trim(), 20);
+            var acctNumber = Cap(req.AcctNumber.Trim(), 10);
+            var cheqNoCap = Cap(req.CheqNo.Trim(), 10);
+            var cheqDateCap = Cap(req.CheqDate.Trim(), 10);
+            var remarkCap = Cap(req.RemarkCode.Trim(), 50);
+            var fnameCap = Cap(req.CustFname.Trim(), 20);
+            var lnameCap = Cap(req.CustLname.Trim(), 20);
+            var addr1Cap = Cap(req.Address1.Trim(), 30);
+            var addr2Cap = Cap(req.Address2.Trim(), 25);
+            var addr3Cap = Cap(req.Address3.Trim(), 20);
+            var areaCap = Cap(resolvedAreaName, 20);
+
+            // ── Step 6: Insert ─────────────────────────────────────────────────────
+            // Column order matches legacy VB.NET exactly.
             const string insertSql = @"
         INSERT INTO cheqmy_details (
-            myadd_code, my_branch, my_code,
-            acct_number, cheq_no, amount,
-            cheq_date, no_months, entry_date,
-            postage, bank_charges, surcharge, percentage,
+            myadd_code, my_branch,    my_code,
+            acct_number, cheq_no,     amount,
+            cheq_date,   no_months,   entry_date,
+            postage,     bank_charges, surcharge, percentage,
             remark,
-            cust_fname, cust_lname,
-            address_1, address_2, address_3, area_name,
-            confrm, stjrnl, stprint, stemail,
-            rathmalana, japura, colcity, headoffice,
-            kiribathgoda, kandy, sabgamuwa, nwp
+            cust_fname,  cust_lname,
+            address_1,   address_2,   address_3,  area_name,
+            confrm,  stjrnl, stprint, stemail,
+            rathmalana, japura, colcity,      headoffice,
+            kiribathgoda, kandy, sabgamuwa,   nwp
         ) VALUES (
             ?,?,?, ?,?,?, ?,?,?, ?,?,?,?,
             ?, ?,?, ?,?,?,?,
@@ -807,39 +871,118 @@ namespace Monthly_Collection_Details.Services
             '0','0','0','0','0','0','0','0'
         )";
 
-            using var insCmd = new IfxCommand(insertSql, con) { CommandTimeout = 10 };
+            using var tx = con.BeginTransaction();
 
-            insCmd.Parameters.Add(new IfxParameter { Value = req.MyAddCode.Trim().ToUpper() });
-            insCmd.Parameters.Add(new IfxParameter { Value = req.MyBranch.Trim() });
-            insCmd.Parameters.Add(new IfxParameter { Value = myCode });
+            try
+            {
+                using var ins = new IfxCommand(insertSql, con) { CommandTimeout = 10, Transaction = tx };
 
-            insCmd.Parameters.Add(new IfxParameter { Value = req.AcctNumber.Trim() });
-            insCmd.Parameters.Add(new IfxParameter { Value = req.CheqNo.Trim() });
-            insCmd.Parameters.Add(new IfxParameter { Value = req.Amount });
+                ins.Parameters.Add(CreateParameter(IfxType.Char, myAddCode, 20));    // myadd_code
+                ins.Parameters.Add(CreateParameter(IfxType.Char, myBranchCap, 30));  // my_branch
+                ins.Parameters.Add(CreateParameter(IfxType.Char, myCodeCap, 20));    // my_code
 
-            // cheq_date stored as string in the legacy table (matches original VB code)
-            insCmd.Parameters.Add(new IfxParameter { Value = req.CheqDate.Trim() });
-            insCmd.Parameters.Add(new IfxParameter { Value = req.NoMonths });
-            insCmd.Parameters.Add(new IfxParameter { Value = DateTime.Today });   // entry_date = today
+                ins.Parameters.Add(CreateParameter(IfxType.Char, acctNumber, 10));   // acct_number
+                ins.Parameters.Add(CreateParameter(IfxType.Char, cheqNoCap, 10));    // cheq_no
+                ins.Parameters.Add(CreateParameter(IfxType.Decimal, req.Amount));   // amount
 
-            insCmd.Parameters.Add(new IfxParameter { Value = req.Postage });
-            insCmd.Parameters.Add(new IfxParameter { Value = req.BankCharges });
-            insCmd.Parameters.Add(new IfxParameter { Value = req.Surcharge });
-            insCmd.Parameters.Add(new IfxParameter { Value = req.Percentage });
+                // cheq_date is stored as CHAR in Informix
+                ins.Parameters.Add(CreateParameter(IfxType.Char, cheqDateCap, 10));  // cheq_date
+                ins.Parameters.Add(CreateParameter(IfxType.Integer, req.NoMonths)); // no_months
+                ins.Parameters.Add(CreateParameter(IfxType.Date, DateTime.Today));  // entry_date
 
-            insCmd.Parameters.Add(new IfxParameter { Value = req.RemarkCode.Trim() });
+                ins.Parameters.Add(CreateParameter(IfxType.Decimal, req.Postage));      // postage
+                ins.Parameters.Add(CreateParameter(IfxType.Decimal, req.BankCharges));  // bank_charges
+                ins.Parameters.Add(CreateParameter(IfxType.Decimal, req.Surcharge));    // surcharge
+                ins.Parameters.Add(CreateParameter(IfxType.Decimal, req.Percentage));   // percentage
 
-            insCmd.Parameters.Add(new IfxParameter { Value = req.CustFname.Trim() });
-            insCmd.Parameters.Add(new IfxParameter { Value = req.CustLname.Trim() });
+                ins.Parameters.Add(CreateParameter(IfxType.Char, remarkCap, 50));   // remark
+                ins.Parameters.Add(CreateParameter(IfxType.Char, fnameCap, 20));    // cust_fname
+                ins.Parameters.Add(CreateParameter(IfxType.Char, lnameCap, 20));    // cust_lname
 
-            insCmd.Parameters.Add(new IfxParameter { Value = req.Address1.Trim() });
-            insCmd.Parameters.Add(new IfxParameter { Value = req.Address2.Trim() });
-            insCmd.Parameters.Add(new IfxParameter { Value = req.Address3.Trim() });
-            insCmd.Parameters.Add(new IfxParameter { Value = req.AreaName.Trim() });
+                ins.Parameters.Add(CreateParameter(IfxType.Char, addr1Cap, 30));    // address_1
+                ins.Parameters.Add(CreateParameter(IfxType.Char, addr2Cap, 25));    // address_2
+                ins.Parameters.Add(CreateParameter(IfxType.Char, addr3Cap, 20));    // address_3
+                ins.Parameters.Add(CreateParameter(IfxType.Char, areaCap, 20));     // area_name
 
-            await insCmd.ExecuteNonQueryAsync();
+                // Hardcoded flags are inline in SQL — no parameters needed for them
 
-            return myCode;  // returned to frontend for display
+                _logger.LogInformation(
+                    "Saving cheque defaulter. NoticeNo {NoticeNo}, ChequeNo {ChequeNo}, MyAddCode {MyAddCode}",
+                    myCodeCap,
+                    cheqNoCap,
+                    myAddCode);
+
+                await ins.ExecuteNonQueryAsync();
+                await tx.CommitAsync();
+
+                return myCodeCap;
+            }
+            catch (Exception ex)
+            {
+                await tx.RollbackAsync();
+                _logger.LogError(
+                    ex,
+                    "Failed to save cheque defaulter. NoticeNo {NoticeNo}, ChequeNo {ChequeNo}, MyAddCode {MyAddCode}",
+                    req.MyCode.Trim(),
+                    req.CheqNo.Trim(),
+                    req.MyAddCode.Trim());
+                throw;
+            }
+        }
+
+        private static IfxParameter CreateParameter(IfxType type, object value, int? size = null)
+        {
+            var param = new IfxParameter
+            {
+                IfxType = type,
+                Value = value
+            };
+
+            if (size.HasValue)
+                param.Size = size.Value;
+
+            return param;
+        }
+
+        private static int GetScalarInt(object? value)
+        {
+            if (value is null || value == DBNull.Value)
+                return 0;
+
+            if (value is IfxDecimal ifxDecimal)
+                return int.Parse(ifxDecimal.ToString(), CultureInfo.InvariantCulture);
+
+            return Convert.ToInt32(value, CultureInfo.InvariantCulture);
+        }
+
+        private static async Task<string> ResolveAreaNameAsync(IfxConnection con, string accountNo)
+        {
+            const string areaCodeSql = @"
+        SELECT FIRST 1 area_code
+        FROM prn_dat_1
+        WHERE TRIM(acct_number) = ?
+        ORDER BY bill_cycle DESC";
+
+            string areaCode = string.Empty;
+            using (var areaCodeCmd = new IfxCommand(areaCodeSql, con) { CommandTimeout = 5 })
+            {
+                areaCodeCmd.Parameters.Add(new IfxParameter { Value = accountNo });
+                var codeResult = await areaCodeCmd.ExecuteScalarAsync();
+                areaCode = codeResult?.ToString()?.Trim() ?? string.Empty;
+            }
+
+            if (string.IsNullOrWhiteSpace(areaCode))
+                return string.Empty;
+
+            const string areaNameSql = @"
+        SELECT FIRST 1 area_name
+        FROM areas
+        WHERE area_code = ?";
+
+            using var areaNameCmd = new IfxCommand(areaNameSql, con) { CommandTimeout = 5 };
+            areaNameCmd.Parameters.Add(new IfxParameter { Value = areaCode });
+            var nameResult = await areaNameCmd.ExecuteScalarAsync();
+            return nameResult?.ToString()?.Trim() ?? string.Empty;
         }
     }
 }
