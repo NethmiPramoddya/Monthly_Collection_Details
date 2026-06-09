@@ -110,19 +110,103 @@ namespace Monthly_Collection_Details.Services
             Action<string, float, float, PdfFont, float> writeText,
             PdfFont fontRegular)
         {
+            
             // Line 1 — "...pay immediately a sum of Rs. ___ being"
-            // Blank starts at x=387, baseline topY≈272 (same line structure as Colombo)
-            writeText($"{d.Total:F2}", 387, 272, fontRegular, 10);
+            // Blank starts at x=387, baseline topY≈272
+            writeText($"{d.Total:F2}", 400, 268, fontRegular, 10);
 
-            // Line 2 — "...Rs ___ for postage, Rs. ___ for dishonoured cheque charges..."
-            // NWP has no "/- " suffix; BankCharges blank positioned slightly differently
-            writeText($"{d.Postage:F0}", 179, 280, fontRegular, 10);
-            writeText($"{d.BankCharges:F0}", 344, 280, fontRegular, 10);
-
+            // Line 2 — "...Rs. ___/- for postage, Rs. ___/- for dishonoured cheque charges..."
+            // Postage blank starts at x=179, BankCharges blank starts at x=350, baseline topY≈280
+            writeText($"{d.Postage:F0}", 179, 279, fontRegular, 10);
+            writeText($"{d.BankCharges:F0}", 300, 279, fontRegular, 10);
             // Line 3 — "...surcharge of Rs.___ on the value..."
             // NWP writes a currency amount (Rs.X), not a percentage
             // Blank starts at x=278, baseline topY≈291
-            writeText($"Rs.{d.Surcharge:F0}", 278, 291, fontRegular, 10);
+            writeText($"Rs.{d.Surcharge:F0}", 164, 290, fontRegular, 9);
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // HEAD OFFICE DRAWER  (province code "111")
+    // ──────────────────────────────────────────────────────────────────────────
+    // TODO: Measure blank positions from the Head Office template PDF using
+    // pdfplumber and replace the placeholder coordinates below.
+    // ══════════════════════════════════════════════════════════════════════════
+    public class HeadOfficeDrawer : IProvinceDrawer
+    {
+        public void DrawChargesParagraph(
+            Model1.ChequeNoticeDetail d,
+            Action<string, float, float, PdfFont, float> writeText,
+            PdfFont fontRegular)
+        {
+            // Line 1 — "...pay immediately a sum of Rs. ___ being"
+            // TODO: Replace coordinates after pdfplumber measurement
+            writeText($"{d.Total:F2}", 400, 279, fontRegular, 10);
+
+            // Line 2 — "...Rs. ___/- for postage, Rs. ___/- for dishonoured cheque charges..."
+            // TODO: Replace coordinates after pdfplumber measurement
+            writeText($"{d.Postage:F0}", 179, 290, fontRegular, 10);
+            writeText($"{d.BankCharges:F0}", 300, 290, fontRegular, 10);
+
+            // Line 3 — "...surcharge of ___% on the value..."
+            // TODO: Replace coordinates after pdfplumber measurement
+            writeText($"{d.Percentage:F0}", 170, 300, fontRegular, 10);
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // NORTHERN PROVINCE DRAWER  (province code "4")
+    // ──────────────────────────────────────────────────────────────────────────
+    // TODO: Measure blank positions from the Northern Province template PDF
+    // using pdfplumber and replace the placeholder coordinates below.
+    // ══════════════════════════════════════════════════════════════════════════
+    public class NorthernProvinceDrawer : IProvinceDrawer
+    {
+        public void DrawChargesParagraph(
+            Model1.ChequeNoticeDetail d,
+            Action<string, float, float, PdfFont, float> writeText,
+            PdfFont fontRegular)
+        {
+            // Line 1 — "...pay immediately a sum of Rs. ___ being"
+            // TODO: Replace coordinates after pdfplumber measurement
+            writeText($"{d.Total:F2}", 400, 279, fontRegular, 10);
+
+            // Line 2 — "...Rs. ___/- for postage, Rs. ___/- for dishonoured cheque charges..."
+            // TODO: Replace coordinates after pdfplumber measurement
+            writeText($"{d.Postage:F0}", 179, 290, fontRegular, 10);
+            writeText($"{d.BankCharges:F0}", 300, 290, fontRegular, 10);
+
+            // Line 3 — "...surcharge of ___% on the value..."
+            // TODO: Replace coordinates after pdfplumber measurement
+            writeText($"{d.Percentage:F0}", 170, 300, fontRegular, 10);
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // SOUTHERN PROVINCE 2 DRAWER  (province code "F")
+    // ──────────────────────────────────────────────────────────────────────────
+    // TODO: Measure blank positions from the Southern Province 2 template PDF
+    // using pdfplumber and replace the placeholder coordinates below.
+    // ══════════════════════════════════════════════════════════════════════════
+    public class SouthernProvince2Drawer : IProvinceDrawer
+    {
+        public void DrawChargesParagraph(
+            Model1.ChequeNoticeDetail d,
+            Action<string, float, float, PdfFont, float> writeText,
+            PdfFont fontRegular)
+        {
+            // Line 1 — "...pay immediately a sum of Rs. ___ being"
+            // TODO: Replace coordinates after pdfplumber measurement
+            writeText($"{d.Total:F2}", 400, 279, fontRegular, 10);
+
+            // Line 2 — "...Rs. ___/- for postage, Rs. ___/- for dishonoured cheque charges..."
+            // TODO: Replace coordinates after pdfplumber measurement
+            writeText($"{d.Postage:F0}", 179, 290, fontRegular, 10);
+            writeText($"{d.BankCharges:F0}", 300, 290, fontRegular, 10);
+
+            // Line 3 — "...surcharge of ___% on the value..."
+            // TODO: Replace coordinates after pdfplumber measurement
+            writeText($"{d.Percentage:F0}", 170, 300, fontRegular, 10);
         }
     }
 
@@ -171,25 +255,25 @@ namespace Monthly_Collection_Details.Services
         // DefaultDrawer below acts as a safety net for any unknown code.
         // ─────────────────────────────────────────────────────────────────────
         private static readonly Dictionary<string, IProvinceDrawer> ProvinceDrawers =
-            new(StringComparer.OrdinalIgnoreCase)
-            {
-                ["1"] = new ColomboCityDrawer(),
-                ["2"] = new ColomboCityDrawer(),
-                ["4"] = new ColomboCityDrawer(),
-                ["5"] = new ColomboCityDrawer(),
-                ["6"] = new ColomboCityDrawer(),
-                ["7"] = new ColomboCityDrawer(),
-                ["8"] = new NwpDrawer(),            // ← only exception
-                ["9"] = new ColomboCityDrawer(),
-                ["111"] = new ColomboCityDrawer(),
-                ["222"] = new ColomboCityDrawer(),
-                ["A"] = new ColomboCityDrawer(),
-                ["B"] = new ColomboCityDrawer(),
-                ["C"] = new ColomboCityDrawer(),
-                ["D"] = new ColomboCityDrawer(),
-                ["E"] = new ColomboCityDrawer(),
-                ["F"] = new ColomboCityDrawer(),
-            };
+                new(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["1"] = new ColomboCityDrawer(),
+                    ["2"] = new ColomboCityDrawer(),
+                    ["4"] = new NorthernProvinceDrawer(),      // ← was ColomboCityDrawer
+                    ["5"] = new ColomboCityDrawer(),
+                    ["6"] = new ColomboCityDrawer(),
+                    ["7"] = new ColomboCityDrawer(),
+                    ["8"] = new NwpDrawer(),
+                    ["9"] = new ColomboCityDrawer(),
+                    ["111"] = new HeadOfficeDrawer(),             // ← was ColomboCityDrawer
+                    ["222"] = new ColomboCityDrawer(),
+                    ["A"] = new ColomboCityDrawer(),
+                    ["B"] = new ColomboCityDrawer(),
+                    ["C"] = new ColomboCityDrawer(),
+                    ["D"] = new ColomboCityDrawer(),
+                    ["E"] = new ColomboCityDrawer(),
+                    ["F"] = new SouthernProvince2Drawer(),      // ← was ColomboCityDrawer
+                };
 
         // Safety net — if an unknown province code somehow reaches GenerateNotice,
         // ColomboCityDrawer is used rather than crashing the PDF generation.
@@ -354,7 +438,7 @@ namespace Monthly_Collection_Details.Services
             // "The cheque bearing no ___ dated ___ for Rs. ___ forwarded by you"
             // ══════════════════════════════════════════════════════════════════
             WriteText(d.ChequeNo, 167, 234, fontBold, 10);
-            WriteText(d.ChequeDate, 246, 235, fontBold, 10);
+            WriteText(d.ChequeDate, 246, 234, fontBold, 10);
             WriteText($"{d.Amount:F2}", 333, 234, fontBold, 10);
 
             // ══════════════════════════════════════════════════════════════════
