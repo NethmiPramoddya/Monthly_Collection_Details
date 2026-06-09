@@ -10,6 +10,7 @@ namespace Monthly_Collection_Details.Services
     {
         private readonly string _connectionString;   // LargestCustomers — cheqmy_*, prn_dat_1
         private readonly string _connectionString2;  // pmnt_consld      — chq_mnyord
+        private readonly string _bulkDb;              // BulkDb           — for future bulk operations, not used yet
         private readonly HttpClient _httpClient;
         private readonly string _billCycleUrl;
         private readonly ILogger<Service1> _logger;
@@ -18,6 +19,7 @@ namespace Monthly_Collection_Details.Services
         {
             _connectionString = configuration.GetConnectionString("LargestCustomers");
             _connectionString2 = configuration.GetConnectionString("pmnt_consld");
+            _bulkDb = configuration.GetConnectionString("BulkDb");
             _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
             _billCycleUrl = configuration["ExternalApis:BillCycleUrl"];
             _logger = logger;
@@ -260,23 +262,29 @@ namespace Monthly_Collection_Details.Services
         // prn_dat_1   → _connectionString  (LargestCustomers)
         // ──────────────────────────────────────────────────────────────────
         public async Task<List<Model1.NewDefaulterResult>> SearchByAccountAsync(
-            string accountNo, DateTime receivedDate, int billCycle)
+        string accountNo, DateTime receivedDate, int billCycle,
+        string myAddCode, Model1.BillingType billingType)        // ← ADD billingType
         {
             string trimmedAccount = accountNo.Trim();
 
-            // Fire both DB queries at the same time — no sequential waiting
             var chequeTask = FetchChequeRowsByAccountAsync(trimmedAccount, receivedDate);
-            var customerTask = FetchCustomerByAccountAsync(trimmedAccount, billCycle);
 
-            await Task.WhenAll(chequeTask, customerTask);
+            // ← Route customer fetch based on billing type
+            var customerTask = billingType == Model1.BillingType.HeavySupply
+                ? FetchHeavyCustomerByAccountAsync(trimmedAccount, billCycle)
+                : FetchCustomerByAccountAsync(trimmedAccount, billCycle);
+
+            var branchTask = ResolveMyBranchAsync(myAddCode.Trim().ToUpper());
+
+            await Task.WhenAll(chequeTask, customerTask, branchTask);
 
             var chequeRows = chequeTask.Result;
             var customer = customerTask.Result;
+            var myBranch = branchTask.Result;
 
             if (chequeRows.Count == 0 || customer == null)
                 return new List<Model1.NewDefaulterResult>();
 
-            // Merge cheque rows with customer info in C#
             return chequeRows.Select(row => new Model1.NewDefaulterResult
             {
                 CustomerName = customer.CustomerName,
@@ -286,19 +294,15 @@ namespace Monthly_Collection_Details.Services
                 ChequeNo = row.chequeNo,
                 Amount = row.amount,
                 AccountNo = row.acno,
-                Branch = row.branch,
+                Branch = myBranch,
+                BranchCode = row.branch,
                 BankCode = row.bankCode
             }).ToList();
         }
 
-        // ──────────────────────────────────────────────────────────────────
-        // SEARCH by Cheque No
-        // Step 1: single-row fetch from chq_mnyord  (_connectionString2)
-        // Step 2: customer lookup from prn_dat_1    (_connectionString)
-        // Step 3: merge in C#
-        // ──────────────────────────────────────────────────────────────────
+
         public async Task<List<Model1.NewDefaulterResult>> SearchByChequeAsync(
-            string chequeNo, string bankCode, string branchCode, int billCycle)
+    string chequeNo, string bankCode, string branchCode, int billCycle, string myAddCode, Model1.BillingType billingType)
         {
             var results = new List<Model1.NewDefaulterResult>();
 
@@ -314,12 +318,12 @@ namespace Monthly_Collection_Details.Services
                 await con.OpenAsync();
 
                 const string sql = @"
-                    SELECT FIRST 1
-                        acno_pivno, trans_amt, bran_code, bnk_post_code, chq_mny_no
-                    FROM chq_mnyord
-                    WHERE TRIM(chq_mny_no)    = ?
-                      AND TRIM(bnk_post_code) = ?
-                      AND TRIM(bran_code)     = ?";
+            SELECT FIRST 1
+                acno_pivno, trans_amt, bran_code, bnk_post_code, chq_mny_no
+            FROM chq_mnyord
+            WHERE TRIM(chq_mny_no)    = ?
+              AND TRIM(bnk_post_code) = ?
+              AND TRIM(bran_code)     = ?";
 
                 using var cmd = new IfxCommand(sql, con) { CommandTimeout = 5 };
                 cmd.Parameters.Add(new IfxParameter { Value = chequeNo.Trim() });
@@ -337,11 +341,19 @@ namespace Monthly_Collection_Details.Services
                 }
             }
 
-            // Cheque not found — stop here
             if (string.IsNullOrEmpty(accountNo)) return results;
 
-            // ── Step 2: prn_dat_1 → _connectionString ─────────────────────
-            var customer = await FetchCustomerByAccountAsync(accountNo, billCycle);
+            // ── Step 2: prn_dat_1 + cheqmy_no — fire in parallel ──────────
+            var customerTask = billingType == Model1.BillingType.HeavySupply
+        ? FetchHeavyCustomerByAccountAsync(accountNo, billCycle)
+        : FetchCustomerByAccountAsync(accountNo, billCycle);
+
+            var branchTask = ResolveMyBranchAsync(myAddCode.Trim().ToUpper());
+
+            await Task.WhenAll(customerTask, branchTask);
+
+            var customer = customerTask.Result;
+            var myBranch = branchTask.Result;
 
             if (customer == null) return results;
 
@@ -355,12 +367,85 @@ namespace Monthly_Collection_Details.Services
                 ChequeNo = chequeNoDb,
                 Amount = amount,
                 AccountNo = accountNo,
-                Branch = branch,
+                Branch = myBranch,   // ← my_branch display value
+                BranchCode = branch,     // ← bran_code kept for functional use
                 BankCode = bankCodeDb
             });
 
             return results;
         }
+
+        // ──────────────────────────────────────────────────────────────────
+        // SEARCH by Cheque No
+        // Step 1: single-row fetch from chq_mnyord  (_connectionString2)
+        // Step 2: customer lookup from prn_dat_1    (_connectionString)
+        // Step 3: merge in C#
+        // ──────────────────────────────────────────────────────────────────
+        //public async Task<List<Model1.NewDefaulterResult>> SearchByChequeAsync(
+        //    string chequeNo, string bankCode, string branchCode, int billCycle)
+        //{
+        //    var results = new List<Model1.NewDefaulterResult>();
+
+        //    // ── Step 1: chq_mnyord → _connectionString2 ───────────────────
+        //    string? accountNo = null;
+        //    decimal amount = 0;
+        //    string branch = "";
+        //    string bankCodeDb = "";
+        //    string chequeNoDb = "";
+
+        //    using (var con = new IfxConnection(_connectionString2))
+        //    {
+        //        await con.OpenAsync();
+
+        //        const string sql = @"
+        //            SELECT FIRST 1
+        //                acno_pivno, trans_amt, bran_code, bnk_post_code, chq_mny_no
+        //            FROM chq_mnyord
+        //            WHERE TRIM(chq_mny_no)    = ?
+        //              AND TRIM(bnk_post_code) = ?
+        //              AND TRIM(bran_code)     = ?";
+
+        //        using var cmd = new IfxCommand(sql, con) { CommandTimeout = 5 };
+        //        cmd.Parameters.Add(new IfxParameter { Value = chequeNo.Trim() });
+        //        cmd.Parameters.Add(new IfxParameter { Value = bankCode.Trim() });
+        //        cmd.Parameters.Add(new IfxParameter { Value = branchCode.Trim() });
+
+        //        using var reader = await cmd.ExecuteReaderAsync();
+        //        if (await reader.ReadAsync())
+        //        {
+        //            accountNo = reader["acno_pivno"].ToString()?.Trim();
+        //            amount = Convert.ToDecimal(reader["trans_amt"]);
+        //            branch = reader["bran_code"].ToString()?.Trim() ?? "";
+        //            bankCodeDb = reader["bnk_post_code"].ToString()?.Trim() ?? "";
+        //            chequeNoDb = reader["chq_mny_no"].ToString()?.Trim() ?? "";
+        //        }
+        //    }
+
+        //    // Cheque not found — stop here
+        //    if (string.IsNullOrEmpty(accountNo)) return results;
+
+        //    // ── Step 2: prn_dat_1 → _connectionString ─────────────────────
+        //    var customer = await FetchCustomerByAccountAsync(accountNo, billCycle);
+
+        //    if (customer == null) return results;
+
+        //    // ── Step 3: merge ──────────────────────────────────────────────
+        //    results.Add(new Model1.NewDefaulterResult
+        //    {
+        //        CustomerName = customer.CustomerName,
+        //        Address = customer.Address,
+        //        Area = customer.Area,
+        //        AreaCode = customer.AreaCode,
+        //        ChequeNo = chequeNoDb,
+        //        Amount = amount,
+        //        AccountNo = accountNo,
+        //        Branch = myBranch,    // ← D.G.M/C.C/ACCT/REV/C — shown on frontend
+        //        BranchCode = branch,      // ← 001 — kept for functional use, not displayed
+        //        BankCode = bankCodeDb
+        //    });
+
+        //    return results;
+        //}
 
         // ──────────────────────────────────────────────────────────────────
         // 90-DAY SEARCH — By Account No
@@ -521,41 +606,72 @@ namespace Monthly_Collection_Details.Services
         }
 
         // Fetches customer info for an account number from prn_dat_1
+        // Resolves area_name from areas table — shows name not code
         // Database: LargestCustomers (_connectionString)
         private async Task<Model1.CustomerInfo?> FetchCustomerByAccountAsync(
             string accountNo, int billCycle)
         {
-            using var con = new IfxConnection(_connectionString);
-            await con.OpenAsync();
+            // ── Step 1: fetch customer row from prn_dat_1 ──────────────────────
+            string fname, lname, addr1, addr2, addr3, areaCd;
 
-            const string sql = @"
-                SELECT FIRST 1
-                    cust_fname, cust_lname, address_1, address_2, address_3, area_code
-                FROM prn_dat_1
-                WHERE TRIM(acct_number) = ?
-                  AND bill_cycle        = ?";
+            using (var con = new IfxConnection(_connectionString))
+            {
+                await con.OpenAsync();
 
-            using var cmd = new IfxCommand(sql, con) { CommandTimeout = 5 };
-            cmd.Parameters.Add(new IfxParameter { Value = accountNo });
-            cmd.Parameters.Add(new IfxParameter { Value = billCycle });
+                const string sql = @"
+            SELECT FIRST 1
+                cust_fname, cust_lname,
+                address_1, address_2, address_3,
+                area_code
+            FROM prn_dat_1
+            WHERE TRIM(acct_number) = ?
+              AND bill_cycle        = ?";
 
-            using var reader = await cmd.ExecuteReaderAsync();
+                using var cmd = new IfxCommand(sql, con) { CommandTimeout = 5 };
+                cmd.Parameters.Add(new IfxParameter { Value = accountNo });
+                cmd.Parameters.Add(new IfxParameter { Value = billCycle });
 
-            if (!await reader.ReadAsync()) return null;
+                using var reader = await cmd.ExecuteReaderAsync();
+                if (!await reader.ReadAsync()) return null;
 
-            string addr1 = reader["address_1"].ToString()?.Trim() ?? "";
-            string addr2 = reader["address_2"].ToString()?.Trim() ?? "";
-            string addr3 = reader["address_3"].ToString()?.Trim() ?? "";
+                fname = reader["cust_fname"].ToString()?.Trim() ?? "";
+                lname = reader["cust_lname"].ToString()?.Trim() ?? "";
+                addr1 = reader["address_1"].ToString()?.Trim() ?? "";
+                addr2 = reader["address_2"].ToString()?.Trim() ?? "";
+                addr3 = reader["address_3"].ToString()?.Trim() ?? "";
+                areaCd = reader["area_code"].ToString()?.Trim() ?? "";
+            }
 
+            // ── Step 2: resolve area_name from areas table ─────────────────────
+            string areaName = areaCd;   // fallback: show area code if lookup fails
+
+            if (!string.IsNullOrWhiteSpace(areaCd))
+            {
+                using var con2 = new IfxConnection(_connectionString);
+                await con2.OpenAsync();
+
+                const string areaSql = @"
+            SELECT FIRST 1 area_name
+            FROM areas
+            WHERE TRIM(area_code) = ?";
+
+                using var areaCmd = new IfxCommand(areaSql, con2) { CommandTimeout = 5 };
+                areaCmd.Parameters.Add(new IfxParameter { Value = areaCd });
+
+                var result = await areaCmd.ExecuteScalarAsync();
+                if (result != null && result != DBNull.Value)
+                    areaName = result.ToString()?.Trim() ?? areaCd;
+            }
+
+            // ── Step 3: build and return ───────────────────────────────────────
             return new Model1.CustomerInfo
             {
-                CustomerName = (reader["cust_fname"].ToString()?.Trim()
-                              + " " + reader["cust_lname"].ToString()?.Trim()).Trim(),
+                CustomerName = (fname + " " + lname).Trim(),
                 Address = string.Join(", ",
-                               new[] { addr1, addr2, addr3 }
-                               .Where(s => !string.IsNullOrEmpty(s))),
-                Area = reader["area_code"].ToString()?.Trim() ?? "",
-                AreaCode = reader["area_code"].ToString()?.Trim() ?? ""
+                                   new[] { addr1, addr2, addr3 }
+                                   .Where(s => !string.IsNullOrEmpty(s))),
+                Area = areaName,   // ← now shows "PILIYANDALA" not "21"
+                AreaCode = areaCd      // ← still keeps "21" for functional use
             };
         }
 
@@ -563,36 +679,66 @@ namespace Monthly_Collection_Details.Services
         // Returns the most recent customer record for the account
         private async Task<Model1.ChequeCustomerInfo?> FetchChequeCustomerByAccountAsync(string accountNo)
         {
-            using var con = new IfxConnection(_connectionString);
-            await con.OpenAsync();
+            // ── Step 1: fetch customer row from prn_dat_1 ──────────────────────
+            string acctNo, fname, lname, addr1, addr2, addr3, areaCd;
 
-            const string sql = @"
-        SELECT FIRST 1
-            acct_number, cust_fname, cust_lname,
-            address_1, address_2, address_3, area_code
-        FROM prn_dat_1
-        WHERE TRIM(acct_number) = ?
-        ORDER BY bill_cycle DESC";
+            using (var con = new IfxConnection(_connectionString))
+            {
+                await con.OpenAsync();
 
-            using var cmd = new IfxCommand(sql, con) { CommandTimeout = 5 };
-            cmd.Parameters.Add(new IfxParameter { Value = accountNo });
+                const string sql = @"
+            SELECT FIRST 1
+                acct_number, cust_fname, cust_lname,
+                address_1, address_2, address_3, area_code
+            FROM prn_dat_1
+            WHERE TRIM(acct_number) = ?
+            ORDER BY bill_cycle DESC";
 
-            using var reader = await cmd.ExecuteReaderAsync();
-            if (!await reader.ReadAsync()) return null;
+                using var cmd = new IfxCommand(sql, con) { CommandTimeout = 5 };
+                cmd.Parameters.Add(new IfxParameter { Value = accountNo });
 
-            string addr1 = reader["address_1"].ToString()?.Trim() ?? "";
-            string addr2 = reader["address_2"].ToString()?.Trim() ?? "";
-            string addr3 = reader["address_3"].ToString()?.Trim() ?? "";
+                using var reader = await cmd.ExecuteReaderAsync();
+                if (!await reader.ReadAsync()) return null;
 
+                acctNo = reader["acct_number"].ToString()?.Trim() ?? "";
+                fname = reader["cust_fname"].ToString()?.Trim() ?? "";
+                lname = reader["cust_lname"].ToString()?.Trim() ?? "";
+                addr1 = reader["address_1"].ToString()?.Trim() ?? "";
+                addr2 = reader["address_2"].ToString()?.Trim() ?? "";
+                addr3 = reader["address_3"].ToString()?.Trim() ?? "";
+                areaCd = reader["area_code"].ToString()?.Trim() ?? "";
+            }
+
+            // ── Step 2: resolve area_name from areas table ─────────────────────
+            string areaName = areaCd;   // fallback: show area code if lookup fails
+
+            if (!string.IsNullOrWhiteSpace(areaCd))
+            {
+                using var con2 = new IfxConnection(_connectionString);
+                await con2.OpenAsync();
+
+                const string areaSql = @"
+            SELECT FIRST 1 area_name
+            FROM areas
+            WHERE TRIM(area_code) = ?";
+
+                using var areaCmd = new IfxCommand(areaSql, con2) { CommandTimeout = 5 };
+                areaCmd.Parameters.Add(new IfxParameter { Value = areaCd });
+
+                var result = await areaCmd.ExecuteScalarAsync();
+                if (result != null && result != DBNull.Value)
+                    areaName = result.ToString()?.Trim() ?? areaCd;
+            }
+
+            // ── Step 3: build and return ───────────────────────────────────────
             return new Model1.ChequeCustomerInfo
             {
-                AccountNo = reader["acct_number"].ToString()?.Trim() ?? "",
-                CustomerName = (reader["cust_fname"].ToString()?.Trim()
-                              + " " + reader["cust_lname"].ToString()?.Trim()).Trim(),
+                AccountNo = acctNo,
+                CustomerName = (fname + " " + lname).Trim(),
                 Address = string.Join(", ",
                                    new[] { addr1, addr2, addr3 }
                                    .Where(s => !string.IsNullOrEmpty(s))),
-                Area = reader["area_code"].ToString()?.Trim() ?? ""
+                Area = areaName   // ← now shows name not code
             };
         }
 
@@ -773,14 +919,15 @@ namespace Monthly_Collection_Details.Services
             if (req.NoMonths < 3)
                 throw new ArgumentException("No of months must be at least 3.");
 
-            if (!DateTime.TryParseExact(
+            if (!string.IsNullOrWhiteSpace(req.CheqDate) &&
+                !DateTime.TryParseExact(
                     req.CheqDate.Trim(),
                     "dd/MM/yyyy",
                     CultureInfo.InvariantCulture,
                     DateTimeStyles.None,
                     out _))
             {
-                throw new ArgumentException("CheqDate must be in dd/MM/yyyy format.");
+                throw new ArgumentException("CheqDate must be in dd/MM/yyyy format or left empty.");
             }
 
             // ── Step 2: Resolve my_branch from cheqmy_no ───────────────────────────
@@ -841,7 +988,7 @@ namespace Monthly_Collection_Details.Services
             var myCodeCap = Cap(req.MyCode.Trim(), 20);
             var acctNumber = Cap(req.AcctNumber.Trim(), 10);
             var cheqNoCap = Cap(req.CheqNo.Trim(), 10);
-            var cheqDateCap = Cap(req.CheqDate.Trim(), 10);
+            var cheqDateCap = string.IsNullOrWhiteSpace(req.CheqDate) ? null : Cap(req.CheqDate.Trim(), 10);
             var remarkCap = Cap(req.RemarkCode.Trim(), 50);
             var fnameCap = Cap(req.CustFname.Trim(), 20);
             var lnameCap = Cap(req.CustLname.Trim(), 20);
@@ -886,7 +1033,11 @@ namespace Monthly_Collection_Details.Services
                 ins.Parameters.Add(CreateParameter(IfxType.Decimal, req.Amount));   // amount
 
                 // cheq_date is stored as CHAR in Informix
-                ins.Parameters.Add(CreateParameter(IfxType.Char, cheqDateCap, 10));  // cheq_date
+                // cheq_date stored as CHAR — null when user leaves it blank
+                if (cheqDateCap is null)
+                    ins.Parameters.Add(new IfxParameter { Value = DBNull.Value });
+                else
+                    ins.Parameters.Add(CreateParameter(IfxType.Char, cheqDateCap, 10));  // cheq_date
                 ins.Parameters.Add(CreateParameter(IfxType.Integer, req.NoMonths)); // no_months
                 ins.Parameters.Add(CreateParameter(IfxType.Date, DateTime.Today));  // entry_date
 
@@ -983,6 +1134,94 @@ namespace Monthly_Collection_Details.Services
             areaNameCmd.Parameters.Add(new IfxParameter { Value = areaCode });
             var nameResult = await areaNameCmd.ExecuteScalarAsync();
             return nameResult?.ToString()?.Trim() ?? string.Empty;
+        }
+
+        // Resolves my_branch from cheqmy_no using the logged-in user's myadd_code
+        // Database: LargestCustomers (_connectionString)
+        private async Task<string> ResolveMyBranchAsync(string myAddCode)
+        {
+            using var con = new IfxConnection(_connectionString);
+            await con.OpenAsync();
+
+            const string sql = @"
+        SELECT FIRST 1 my_branch
+        FROM cheqmy_no
+        WHERE myadd_code = ?";
+
+            using var cmd = new IfxCommand(sql, con) { CommandTimeout = 5 };
+            cmd.Parameters.Add(new IfxParameter { Value = myAddCode });
+
+            var result = await cmd.ExecuteScalarAsync();
+            return result?.ToString()?.Trim() ?? string.Empty;
+        }
+
+        // Fetches customer info from `customer` table — Heavy Supply Billing
+        // Database: LargestCustomers (_connectionString)
+        private async Task<Model1.CustomerInfo?> FetchHeavyCustomerByAccountAsync(
+    string accountNo, int billCycle)
+        {
+            // ── Step 1: fetch customer row from BulkDb ─────────────────────────
+            string name, addr1, addr2, addr3, areaCd;
+
+            using (var con = new IfxConnection(_bulkDb))
+            {
+                await con.OpenAsync();
+
+                const string sql = @"
+            SELECT FIRST 1
+                c.name,
+                c.address_l1,
+                c.address_l2,
+                c.city,
+                c.area_cd
+            FROM customer c
+            WHERE TRIM(c.acc_nbr) = ?";
+
+                using var cmd = new IfxCommand(sql, con) { CommandTimeout = 5 };
+                cmd.Parameters.Add(new IfxParameter { Value = accountNo });
+
+                using var reader = await cmd.ExecuteReaderAsync();
+                if (!await reader.ReadAsync()) return null;
+
+                name = reader["name"].ToString()?.Trim() ?? "";
+                addr1 = reader["address_l1"].ToString()?.Trim() ?? "";
+                addr2 = reader["address_l2"].ToString()?.Trim() ?? "";
+                addr3 = reader["city"].ToString()?.Trim() ?? "";
+                areaCd = reader["area_cd"].ToString()?.Trim() ?? "";
+            }
+
+            // ── Step 2: resolve area_name from LargestCustomers ───────────────
+            // areas table lives in LargestCustomers, not BulkDb
+            string areaName = areaCd;   // fallback: show area code if lookup fails
+
+            if (!string.IsNullOrWhiteSpace(areaCd))
+            {
+                using var con2 = new IfxConnection(_connectionString);
+                await con2.OpenAsync();
+
+                const string areaSql = @"
+            SELECT FIRST 1 area_name
+            FROM areas
+            WHERE TRIM(area_code) = ?";
+
+                using var areaCmd = new IfxCommand(areaSql, con2) { CommandTimeout = 5 };
+                areaCmd.Parameters.Add(new IfxParameter { Value = areaCd });
+
+                var result = await areaCmd.ExecuteScalarAsync();
+                if (result != null && result != DBNull.Value)
+                    areaName = result.ToString()?.Trim() ?? areaCd;
+            }
+
+            // ── Step 3: build and return ───────────────────────────────────────
+            return new Model1.CustomerInfo
+            {
+                CustomerName = name,
+                Address = string.Join(", ",
+                                   new[] { addr1, addr2, addr3 }
+                                   .Where(s => !string.IsNullOrEmpty(s))),
+                Area = areaName,
+                AreaCode = areaCd
+            };
         }
     }
 }

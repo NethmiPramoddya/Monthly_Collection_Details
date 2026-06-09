@@ -6,6 +6,7 @@ using iText.Kernel.Pdf;
 using iText.Kernel.Pdf.Canvas;
 using Microsoft.AspNetCore.Hosting;
 using Monthly_Collection_Details.Models;
+using iText.IO.Font;
 
 namespace Monthly_Collection_Details.Services
 {
@@ -46,11 +47,21 @@ namespace Monthly_Collection_Details.Services
     // ──────────────────────────────────────────────────────────────────────────
     // Used by ALL provinces except NWP (code "8").
     //
-    // Template paragraph (gaps shown as ___):
-    //   "...pay immediately a sum of Rs. _TOTAL_ being
-    //    the value of dishonoured cheque, Rs. _POSTAGE_/- for postage,
-    //    Rs. _BANKCHARGES_/- for dishonoured cheque charges charged
-    //    by the bank and surcharge of _PERCENTAGE_% on the value of the cheque..."
+    // Coordinates derived from pdfplumber analysis of the live template PDF.
+    // Page height = 842.25pt, all topY values are from TOP of page (pdfplumber
+    // "top" / "bottom" fields map directly to iText topY).
+    //
+    // Template paragraph blank positions:
+    //   Line 258 — "...pay immediately a sum of Rs. [TOTAL] being..."
+    //              Blank x=387–465, baseline bottom≈272 → topY=272
+    //
+    //   Line 270 — "dishonoured cheque, Rs. [POSTAGE]/- for postage,
+    //               Rs. [BANKCHARGES]/- for dishonoured cheque..."
+    //              Postage blank  x=179–257, BankCharges blank x=350–428
+    //              Baseline bottom≈280 → topY=280
+    //
+    //   Line 281 — "charges charged by the bank and surcharge of [PERCENTAGE]%..."
+    //              Blank x=278–311, baseline bottom≈291 → topY=291
     // ══════════════════════════════════════════════════════════════════════════
     public class ColomboCityDrawer : IProvinceDrawer
     {
@@ -60,14 +71,17 @@ namespace Monthly_Collection_Details.Services
             PdfFont fontRegular)
         {
             // Line 1 — "...pay immediately a sum of Rs. ___ being"
-            writeText($"{d.Total:F2}", 394, 270, fontRegular, 9);
+            // Blank starts at x=387, baseline topY≈272
+            writeText($"{d.Total:F2}", 400, 268, fontRegular, 10);
 
-            // Line 2 — "...Rs. ___ /- for postage, Rs. ___ /- for dishonoured cheque charges..."
-            writeText($"{d.Postage:F0}", 205, 285, fontRegular, 9);
-            writeText($"{d.BankCharges:F0}", 310, 285, fontRegular, 9);
+            // Line 2 — "...Rs. ___/- for postage, Rs. ___/- for dishonoured cheque charges..."
+            // Postage blank starts at x=179, BankCharges blank starts at x=350, baseline topY≈280
+            writeText($"{d.Postage:F0}", 179, 279, fontRegular, 10);
+            writeText($"{d.BankCharges:F0}", 300, 279, fontRegular, 10);
 
             // Line 3 — "...surcharge of ___% on the value..."
-            writeText($"{d.Percentage:F0}", 173, 298, fontRegular, 9);
+            // Blank starts at x=278, baseline topY≈291
+            writeText($"{d.Percentage:F0}", 170, 290, fontRegular, 10);
         }
     }
 
@@ -82,8 +96,12 @@ namespace Monthly_Collection_Details.Services
     //
     // KEY DIFFERENCES vs all other provinces:
     //   - No "/- " suffix after postage or bank charges
-    //   - Wider gaps for postage and bank charges values
+    //   - BankCharges blank is wider / positioned differently (x=344 vs x=350)
     //   - Line 3 writes surcharge amount (Rs.X) instead of percentage
+    //
+    // NOTE: If the NWP template PDF blank positions differ from the Colombo City
+    // template, measure them with pdfplumber against the NWP template file and
+    // update the x / topY values below accordingly.
     // ══════════════════════════════════════════════════════════════════════════
     public class NwpDrawer : IProvinceDrawer
     {
@@ -93,14 +111,18 @@ namespace Monthly_Collection_Details.Services
             PdfFont fontRegular)
         {
             // Line 1 — "...pay immediately a sum of Rs. ___ being"
-            writeText($"{d.Total:F2}", 394, 270, fontRegular, 9);
+            // Blank starts at x=387, baseline topY≈272 (same line structure as Colombo)
+            writeText($"{d.Total:F2}", 387, 272, fontRegular, 10);
 
             // Line 2 — "...Rs ___ for postage, Rs. ___ for dishonoured cheque charges..."
-            writeText($"{d.Postage:F0}", 205, 285, fontRegular, 9);
-            writeText($"{d.BankCharges:F0}", 344, 285, fontRegular, 9);
+            // NWP has no "/- " suffix; BankCharges blank positioned slightly differently
+            writeText($"{d.Postage:F0}", 179, 280, fontRegular, 10);
+            writeText($"{d.BankCharges:F0}", 344, 280, fontRegular, 10);
 
             // Line 3 — "...surcharge of Rs.___ on the value..."
-            writeText($"Rs.{d.Surcharge:F0}", 214, 299, fontRegular, 9);
+            // NWP writes a currency amount (Rs.X), not a percentage
+            // Blank starts at x=278, baseline topY≈291
+            writeText($"Rs.{d.Surcharge:F0}", 278, 291, fontRegular, 10);
         }
     }
 
@@ -222,10 +244,10 @@ namespace Monthly_Collection_Details.Services
             var pageHeight = page.GetPageSize().GetHeight();
 
             // ── Fonts ─────────────────────────────────────────────────────────
-            var fontRegular = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
-            var fontBold = PdfFontFactory.CreateFont(StandardFonts.HELVETICA_BOLD);
-            var fontItalic = PdfFontFactory.CreateFont(StandardFonts.HELVETICA_OBLIQUE);
-            var fontBoldItalic = PdfFontFactory.CreateFont(StandardFonts.HELVETICA_BOLDOBLIQUE);
+            var fontRegular = PdfFontFactory.CreateFont("C:/Windows/Fonts/arial.ttf", PdfEncodings.IDENTITY_H);
+            var fontBold = PdfFontFactory.CreateFont("C:/Windows/Fonts/arialbd.ttf", PdfEncodings.IDENTITY_H);
+            var fontItalic = PdfFontFactory.CreateFont("C:/Windows/Fonts/ariali.ttf", PdfEncodings.IDENTITY_H);
+            var fontBoldItalic = PdfFontFactory.CreateFont("C:/Windows/Fonts/arialbi.ttf", PdfEncodings.IDENTITY_H);
 
             // ── Helper: paint a white rectangle ───────────────────────────────
             // x, topY = top-left corner measured from TOP of page
@@ -291,54 +313,61 @@ namespace Monthly_Collection_Details.Services
             // SECTION D — CUSTOMER NAME
             // Template prints "Mr/Mrs/Miss". Customer name written after the gap.
             // ══════════════════════════════════════════════════════════════════
-            WriteText(d.CustomerName, 103, 103, fontBoldItalic, 10);
+            WriteText(d.CustomerName, 103, 103, fontBold, 10);
 
             // ══════════════════════════════════════════════════════════════════
             // SECTION E — CUSTOMER ADDRESS  (3 lines, ~14 pts apart)
             // ══════════════════════════════════════════════════════════════════
-            WriteText(d.Address1, 56, 120, fontBoldItalic, 10);
+            WhiteOut(56, 108, 300, 50);  // erase all 3 address lines at once
+            WriteText(d.Address1, 103, 120, fontBold, 10);
 
             if (!string.IsNullOrWhiteSpace(d.Address2))
-                WriteText(d.Address2, 56, 134, fontBoldItalic, 10);
+                WriteText(d.Address2, 103, 134, fontBold, 10);   // x=56, consistent with Address1
 
             if (!string.IsNullOrWhiteSpace(d.Address3))
-                WriteText(d.Address3, 56, 148, fontBoldItalic, 10);
+                WriteText(d.Address3, 103, 148, fontBold, 10);   // x=56, consistent
 
             // ══════════════════════════════════════════════════════════════════
             // SECTION F — DATE  (top-right, same row as address area)
             // ══════════════════════════════════════════════════════════════════
-            WriteText(DateTime.Today.ToString("dd/MM/yyyy"), 378, 160, fontBoldItalic, 10);
+            WriteText(DateTime.Today.ToString("dd/MM/yyyy"), 377, 160, fontRegular, 10);
 
             // ══════════════════════════════════════════════════════════════════
             // SECTION G — OFFICE ADDRESS BLOCK  (top-right, below logo)
             // White out the pre-printed office text and write 5 DB values.
             // ══════════════════════════════════════════════════════════════════
             //WhiteOut(375, 80, 220, 80);
-            WriteText(d.OfficeDesc1, 375, 95, fontRegular, 9);
-            WriteText(d.OfficeDesc2, 375, 107, fontRegular, 9);
-            WriteText(d.OfficeDesc3, 375, 119, fontRegular, 9);
-            WriteText(d.OfficeDesc4, 375, 131, fontRegular, 9);
-            WriteText($"Tel. :{d.Tel}", 375, 143, fontRegular, 9);
+            WriteText(d.OfficeDesc1, 375, 95, fontRegular, 10);
+            WriteText(d.OfficeDesc2, 375, 107, fontRegular, 10);
+            WriteText(d.OfficeDesc3, 375, 119, fontRegular, 10);
+            WriteText(d.OfficeDesc4, 375, 131, fontRegular, 10);
+            WriteText($"Tel. :{d.Tel}", 375, 143, fontRegular, 10);
 
             // ══════════════════════════════════════════════════════════════════
             // SECTION H — ACCOUNT NUMBER
             // "Dishonoured cheque - Account No:" heading.
             // ══════════════════════════════════════════════════════════════════
-            WriteText(d.AccountNo, 367, 200, fontBold, 11);
+            WriteText(d.AccountNo, 372, 192, fontBold, 11);
 
             // ══════════════════════════════════════════════════════════════════
             // SECTION I — CHEQUE DETAILS LINE
             // "The cheque bearing no ___ dated ___ for Rs. ___ forwarded by you"
             // ══════════════════════════════════════════════════════════════════
-            WriteText(d.ChequeNo, 146, 227, fontBold, 10);
-            WriteText(d.ChequeDate, 240, 227, fontBold, 10);
-            WriteText($"{d.Amount:F2}", 365, 228, fontBold, 10);
+            WriteText(d.ChequeNo, 167, 234, fontBold, 10);
+            WriteText(d.ChequeDate, 246, 235, fontBold, 10);
+            WriteText($"{d.Amount:F2}", 333, 234, fontBold, 10);
 
             // ══════════════════════════════════════════════════════════════════
             // SECTION J — CHARGES PARAGRAPH  (province-specific layout)
             // This is the only section that differs between province templates.
             // The correct drawer is selected by province code; everything else
             // above and below this block is identical across all templates.
+            //
+            // Coordinates measured via pdfplumber on the Colombo City template:
+            //   Line 1 (Total):       blank x=387–465, baseline topY=272
+            //   Line 2 (Postage):     blank x=179–257, baseline topY=280
+            //   Line 2 (BankCharges): blank x=350–428, baseline topY=280
+            //   Line 3 (Surcharge%):  blank x=278–311, baseline topY=291
             // ══════════════════════════════════════════════════════════════════
             var drawer = ProvinceDrawers.GetValueOrDefault(
                 d.MyAddCode.Trim().ToUpper(), DefaultDrawer);
@@ -348,16 +377,16 @@ namespace Monthly_Collection_Details.Services
             // ══════════════════════════════════════════════════════════════════
             // SECTION K — AREA  (bottom of main body, above "Copy to" section)
             // ══════════════════════════════════════════════════════════════════
-            WriteText(d.Area, 105, 585, fontBold, 9);
+            WriteText(d.Area, 58, 585, fontRegular, 9);
 
             // ══════════════════════════════════════════════════════════════════
             // SECTION L — AMOUNT BREAKDOWN TABLE  (bottom-right)
             // ══════════════════════════════════════════════════════════════════
-            WriteText($"{d.Amount:F2}", 490, 688, fontItalic, 10);
-            WriteText($"{d.Postage:F2}", 490, 702, fontItalic, 10);
-            WriteText($"{d.BankCharges:F2}", 490, 716, fontItalic, 10);
-            WriteText($"{d.Surcharge:F2}", 490, 729, fontItalic, 10);
-            WriteText($"{d.Total:F2}", 490, 745, fontBold, 10);
+            WriteText($"{d.Amount:F2}", 450, 678, fontItalic, 10);
+            WriteText($"{d.Postage:F2}", 465, 691, fontItalic, 10);
+            WriteText($"{d.BankCharges:F2}", 465, 706, fontItalic, 10);
+            WriteText($"{d.Surcharge:F2}", 463, 720, fontItalic, 10);
+            WriteText($"{d.Total:F2}", 450, 745, fontBold, 10);
 
             // ─────────────────────────────────────────────────────────────────
             canvas.Release();

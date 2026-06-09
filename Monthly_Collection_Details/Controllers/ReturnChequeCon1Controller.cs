@@ -193,7 +193,11 @@ namespace Monthly_Collection_Details.Controllers
             var data = await _service.SearchByAccountAsync(
                 request.AccountNo.Trim(),
                 receivedDate,
-                request.BillCycle);
+                request.BillCycle,
+                request.MyAddCode.Trim(), request.BillingType);   // ← ADD THIS
+
+
+
 
             if (data == null || data.Count == 0)
                 return NotFound("No records found for the given account number.");
@@ -203,7 +207,7 @@ namespace Monthly_Collection_Details.Controllers
 
         [HttpPost("search-by-cheque")]
         public async Task<IActionResult> SearchByCheque(
-            [FromBody] Model1.SearchByChequeRequest request)
+    [FromBody] Model1.SearchByChequeRequest request)
         {
             if (request == null || !ModelState.IsValid)
                 return BadRequest(ModelState);
@@ -212,7 +216,8 @@ namespace Monthly_Collection_Details.Controllers
                 request.ChequeNo.Trim(),
                 request.BankCode.Trim(),
                 request.BranchCode.Trim(),
-                request.BillCycle);
+                request.BillCycle,
+                request.MyAddCode.Trim(), request.BillingType);   // ← ADD THIS
 
             if (data == null || data.Count == 0)
                 return NotFound("No records found for the given cheque details.");

@@ -98,6 +98,8 @@ namespace Monthly_Collection_Details.Models
 
             [Required]
             public int BillCycle { get; set; }
+            public string MyAddCode { get; set; } = string.Empty;
+            public BillingType BillingType { get; set; } = BillingType.Ordinary;
         }
 
         // ──────────────────────────────────────────────────────────────────
@@ -116,6 +118,9 @@ namespace Monthly_Collection_Details.Models
 
             [Required]
             public int BillCycle { get; set; }
+
+            public string MyAddCode { get; set; } = string.Empty;
+            public BillingType BillingType { get; set; } = BillingType.Ordinary;
         }
 
         // ──────────────────────────────────────────────────────────────────
@@ -130,7 +135,8 @@ namespace Monthly_Collection_Details.Models
             public string ChequeNo { get; set; } = string.Empty;
             public decimal Amount { get; set; }
             public string AccountNo { get; set; } = string.Empty;
-            public string Branch { get; set; } = string.Empty;
+            public string Branch { get; set; } = string.Empty;      // ← my_branch (display)
+            public string BranchCode { get; set; } = string.Empty;  // ← bran_code (functional)
             public string BankCode { get; set; } = string.Empty;
         }
 
@@ -249,7 +255,7 @@ namespace Monthly_Collection_Details.Models
             [Required] public string AcctNumber { get; set; } = string.Empty; // acct_number
             [Required] public string CheqNo { get; set; } = string.Empty; // cheq_no
             [Required] public decimal Amount { get; set; }                 // trans_amt
-            [Required] public string CheqDate { get; set; } = string.Empty; // dd/MM/yyyy
+             public string CheqDate { get; set; } = string.Empty; // dd/MM/yyyy
             [Required] public string RemarkCode { get; set; } = string.Empty; // cheqremark_code
             [Required] public decimal Postage { get; set; }
             [Required] public decimal BankCharges { get; set; }
@@ -264,6 +270,22 @@ namespace Monthly_Collection_Details.Models
             public string Address2 { get; set; } = string.Empty;
             public string Address3 { get; set; } = string.Empty;
             public string AreaName { get; set; } = string.Empty;
+        }
+
+        // Billing type enum — sent with every search request
+        public enum BillingType
+        {
+            Ordinary = 0,
+            HeavySupply = 1
+        }
+
+        // Customer info fetched from `customer` table (Heavy Supply)
+        public class HeavyCustomerInfo
+        {
+            public string CustomerName { get; set; } = string.Empty;
+            public string Address { get; set; } = string.Empty;
+            public string Area { get; set; } = string.Empty;
+            public string AreaCode { get; set; } = string.Empty;
         }
     }
 }
